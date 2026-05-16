@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Modules\Auth\JwtService;
 use App\Modules\Audit\AuditService;
 use App\Modules\Sessions\ReceiptService;
+use App\Modules\Shifts\ShiftService;
 use App\Support\BillingCalculator;
 use App\Support\Database;
 use App\Support\DatabaseClock;
@@ -35,6 +36,7 @@ $builder->addDefinitions([
     DatabaseClock::class => fn (\Psr\Container\ContainerInterface $c) => new DatabaseClock($c->get(PDO::class)),
     AuditService::class => fn (\Psr\Container\ContainerInterface $c) => new AuditService($c->get(PDO::class)),
     ReceiptService::class => fn (\Psr\Container\ContainerInterface $c) => new ReceiptService($c->get(PDO::class)),
+    ShiftService::class => fn (\Psr\Container\ContainerInterface $c) => new ShiftService($c->get(PDO::class)),
 ]);
 
 return $builder->build();

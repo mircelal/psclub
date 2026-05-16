@@ -16,6 +16,7 @@ use App\Modules\Receipts\ReceiptsController;
 use App\Modules\Reports\ReportsController;
 use App\Modules\Sessions\SessionsController;
 use App\Modules\SessionSets\SessionSetsController;
+use App\Modules\Shifts\ShiftsController;
 use App\Modules\Settings\BusinessMediaController;
 use App\Modules\Settings\SettingsController;
 use App\Modules\Stock\StockController;
@@ -70,6 +71,12 @@ return function (App $app): void {
         $group->get('/reports/daily', [ReportsController::class, 'daily']);
         $group->get('/receipts/{sessionId}/pdf', [ReceiptsController::class, 'pdf']);
 
+        $group->get('/shifts/categories', [ShiftsController::class, 'categories']);
+        $group->get('/shifts/current', [ShiftsController::class, 'current']);
+        $group->post('/shifts/open', [ShiftsController::class, 'open']);
+        $group->post('/shifts/{id}/close', [ShiftsController::class, 'close']);
+        $group->post('/shifts/{id}/movements', [ShiftsController::class, 'addMovement']);
+
         // Admin only
         $group->group('', function (RouteCollectorProxy $admin) {
             $admin->get('/users', [UsersController::class, 'index']);
@@ -82,6 +89,8 @@ return function (App $app): void {
             $admin->delete('/tables/{id}', [TablesController::class, 'destroy']);
 
             $admin->post('/product-categories', [ProductsController::class, 'storeCategory']);
+            $admin->put('/product-categories/{id}', [ProductsController::class, 'updateCategory']);
+            $admin->delete('/product-categories/{id}', [ProductsController::class, 'destroyCategory']);
             $admin->post('/products', [ProductsController::class, 'store']);
             $admin->put('/products/{id}', [ProductsController::class, 'update']);
             $admin->post('/products/{id}/image', [ProductMediaController::class, 'upload']);
@@ -109,6 +118,11 @@ return function (App $app): void {
             $admin->get('/reports/summary', [ReportsController::class, 'summary']);
             $admin->post('/reports/daily-close', [ReportsController::class, 'dailyClose']);
             $admin->get('/audit-logs', [AuditController::class, 'index']);
+
+            $admin->get('/shifts', [ShiftsController::class, 'index']);
+            $admin->get('/shifts/{id}', [ShiftsController::class, 'show']);
+            $admin->get('/cash-movements', [ShiftsController::class, 'movements']);
+            $admin->post('/cash-expenses', [ShiftsController::class, 'adminExpense']);
 
             $admin->get('/orders', [OrdersController::class, 'index']);
             $admin->get('/orders/{id}', [OrdersController::class, 'show']);

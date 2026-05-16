@@ -99,28 +99,17 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     final daily = _data!['daily_trend'] as List<dynamic>? ?? [];
     final topProducts = _data!['top_products'] as List<dynamic>? ?? [];
     final payments = _data!['payment_methods'] as List<dynamic>? ?? [];
-    final activeNow = jsonToInt(_data!['active_sessions']);
+    final activeTable = jsonToInt(_data!['active_table_sessions'] ?? _data!['active_sessions']);
+    final activeCounter = jsonToInt(_data!['active_counter_sessions']);
 
     return ListView(
       padding: const EdgeInsets.all(AppSpacing.xxl),
       children: [
-        if (activeNow > 0)
-          Container(
-            margin: const EdgeInsets.only(bottom: AppSpacing.lg),
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.md),
-            decoration: BoxDecoration(
-              color: AdminTheme.danger(context).withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-              border: Border.all(color: AdminTheme.danger(context).withValues(alpha: 0.3)),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.circle, size: 10, color: AdminTheme.danger(context)),
-                const SizedBox(width: AppSpacing.md),
-                Text('$activeNow aktiv sessiya indi işləyir', style: TextStyle(fontWeight: FontWeight.w600, color: p.textPrimary)),
-              ],
-            ),
-          ),
+        if (activeTable > 0 || activeCounter > 0) _ActiveSessionsBanner(
+          tableCount: activeTable,
+          counterCount: activeCounter,
+          palette: p,
+        ),
         Text('Ümumi baxış', style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: AppSpacing.md),
         LayoutBuilder(
@@ -370,6 +359,68 @@ class _TableRevenueList extends StatelessWidget {
           ),
         );
       }).toList(),
+    );
+  }
+}
+
+class _ActiveSessionsBanner extends StatelessWidget {
+  const _ActiveSessionsBanner({
+    required this.tableCount,
+    required this.counterCount,
+    required this.palette,
+  });
+
+  final int tableCount;
+  final int counterCount;
+  final AppPalette palette;
+
+  @override
+  Widget build(BuildContext context) {
+    final parts = <String>[];
+    if (tableCount > 0) {
+      parts.add('$tableCount masa aktiv');
+    }
+    if (counterCount > 0) {
+      parts.add('$counterCount açıq birbaşa satış');
+    }
+
+    final isCounterOnly = tableCount == 0 && counterCount > 0;
+    final accent = isCounterOnly ? AdminTheme.warning(context) : AdminTheme.danger(context);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: AppSpacing.lg),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.md),
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        border: Border.all(color: accent.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(isCounterOnly ? Icons.shopping_bag_outlined : Icons.circle, size: 18, color: accent),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  parts.join(' · '),
+                  style: TextStyle(fontWeight: FontWeight.w600, color: palette.textPrimary),
+                ),
+                if (isCounterOnly) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    'Masalar boş görünür — bunlar stansiya deyil, kassirdə açıq qalan birbaşa satışlardır. '
+                    'Kassir panelində bağlayın və ya ödəniş alın.',
+                    style: TextStyle(fontSize: 12, color: palette.textSecondary, height: 1.35),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

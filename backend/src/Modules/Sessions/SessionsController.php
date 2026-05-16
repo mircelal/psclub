@@ -6,6 +6,8 @@ namespace App\Modules\Sessions;
 
 use App\Modules\Coupons\CouponsController;
 use App\Modules\SessionSets\SessionSetsController;
+use App\Modules\Shifts\ShiftService;
+use App\Modules\Shifts\ShiftsController;
 use App\Modules\Stock\StockController;
 use App\Support\ApiResponse;
 use App\Support\BillingCalculator;
@@ -24,7 +26,8 @@ final class SessionsController
         private readonly DatabaseClock $clock,
         private readonly StockController $stock,
         private readonly ReceiptService $receipts,
-        private readonly SessionSetsController $sessionSets
+        private readonly SessionSetsController $sessionSets,
+        private readonly ShiftService $shifts,
     ) {
     }
 
@@ -61,6 +64,9 @@ final class SessionsController
     {
         $body = (array) $request->getParsedBody();
         $user = $request->getAttribute('user');
+        if ($denied = ShiftsController::assertCashierHasOpenShift($this->shifts, $user)) {
+            return $denied;
+        }
         $sessionType = ($body['session_type'] ?? 'table') === 'counter' ? 'counter' : 'table';
         $customerId = isset($body['customer_id']) && (int) $body['customer_id'] > 0 ? (int) $body['customer_id'] : null;
 
@@ -451,6 +457,12 @@ final class SessionsController
         if (!$session || $session['status'] === 'closed') {
             return ApiResponse::error('Session not found or already closed', 400);
         }
+        if ($denied = ShiftsController::assertCashierHasOpenShift($this->shifts, $user)) {
+            return $denied;
+        }
+
+        $openShift = $this->shifts->getOpenShift((int) $user['business_id']);
+        $shiftId = $openShift ? (int) $openShift['id'] : null;
 
         $session = $this->syncDiscount($session);
         $closedAt = $this->clock->now();
@@ -490,9 +502,9 @@ final class SessionsController
             ]);
 
             $this->pdo->prepare(
-                'INSERT INTO payments (session_id, method, cash_amount, card_amount, total_amount, created_at)
-                 VALUES (?, ?, ?, ?, ?, NOW())'
-            )->execute([$sessionId, $body['method'], $cash, $card, $total]);
+                'INSERT INTO payments (session_id, shift_id, method, cash_amount, card_amount, total_amount, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, NOW())'
+            )->execute([$sessionId, $shiftId, $body['method'], $cash, $card, $total]);
 
             if (!empty($session['table_id'])) {
                 $this->pdo->prepare("UPDATE tables SET status = 'empty', updated_at = NOW() WHERE id = ?")

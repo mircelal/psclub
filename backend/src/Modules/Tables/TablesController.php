@@ -23,6 +23,8 @@ final class TablesController
 
     public function index(Request $request, Response $response): Response
     {
+        $this->syncTableStatusesFromSessions();
+
         $stmt = $this->pdo->query(
             'SELECT t.*, s.id AS session_id, s.status AS session_status, s.opened_at,
                     s.planned_minutes, s.hourly_rate_snapshot AS session_hourly_rate,
@@ -246,6 +248,41 @@ final class TablesController
         }
 
         return [];
+    }
+
+    /**
+     * Masa statusunu açıq sessiyalarla uyğunlaşdırır (köhnə/uyğunsuz qeydləri düzəldir).
+     */
+    private function syncTableStatusesFromSessions(): void
+    {
+        $this->pdo->exec(
+            "UPDATE tables t
+             INNER JOIN sessions s ON s.table_id = t.id AND s.status IN ('active', 'paused')
+             SET t.status = s.status, t.updated_at = NOW()
+             WHERE t.is_active = 1 AND (t.status NOT IN ('active', 'paused') OR t.status <> s.status)"
+        );
+
+        $this->pdo->exec(
+            "UPDATE tables t
+             SET t.status = 'empty', t.updated_at = NOW()
+             WHERE t.is_active = 1
+               AND t.status IN ('active', 'paused')
+               AND NOT EXISTS (
+                   SELECT 1 FROM sessions s
+                   WHERE s.table_id = t.id AND s.status IN ('active', 'paused')
+               )"
+        );
+
+        // Tərk edilmiş boş birbaşa satışlar (masa deyil) — 30 dəq+ heç nə əlavə olunmayıb
+        $this->pdo->exec(
+            "UPDATE sessions
+             SET status = 'closed', closed_at = NOW(), time_charge = 0, products_total = 0,
+                 total_amount = 0, active_seconds = 0, updated_at = NOW()
+             WHERE status IN ('active', 'paused')
+               AND table_id IS NULL
+               AND opened_at < DATE_SUB(NOW(), INTERVAL 30 MINUTE)
+               AND NOT EXISTS (SELECT 1 FROM session_items si WHERE si.session_id = sessions.id)"
+        );
     }
 
     /** @param list<array{name: string, hourly_rate: float, sort_order: int}> $tariffs */

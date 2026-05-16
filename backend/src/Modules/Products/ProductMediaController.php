@@ -6,6 +6,7 @@ namespace App\Modules\Products;
 
 use App\Support\ApiResponse;
 use App\Support\ImageProcessor;
+use App\Support\MediaUrl;
 use PDO;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -84,8 +85,7 @@ final class ProductMediaController
         @unlink($temp);
         $this->removeOtherVariants($dir, $id);
 
-        $baseUrl = rtrim($_ENV['APP_URL'] ?? 'http://127.0.0.1:8080', '/');
-        $storedUrl = $baseUrl . '/api/media/products/' . $filename . '?v=' . time();
+        $storedUrl = MediaUrl::productImage($filename) . '?v=' . time();
 
         $this->pdo->prepare('UPDATE products SET image_url = ?, updated_at = NOW() WHERE id = ?')
             ->execute([$storedUrl, $id]);

@@ -18,21 +18,114 @@ final class ProductsController
 
     public function indexCategories(Request $request, Response $response): Response
     {
-        $stmt = $this->pdo->query('SELECT * FROM product_categories ORDER BY sort_order, id');
+        $stmt = $this->pdo->query(
+            'SELECT pc.*, COUNT(p.id) AS product_count
+             FROM product_categories pc
+             LEFT JOIN products p ON p.category_id = pc.id AND p.is_active = 1
+             GROUP BY pc.id
+             ORDER BY pc.sort_order, pc.name, pc.id'
+        );
+
         return ApiResponse::success($stmt->fetchAll());
     }
 
     public function storeCategory(Request $request, Response $response): Response
     {
         $body = (array) $request->getParsedBody();
-        if (!v::key('name', v::stringType()->notEmpty())->validate($body)) {
-            return ApiResponse::error('Validation failed', 422);
+        $name = trim((string) ($body['name'] ?? ''));
+        if ($name === '') {
+            return ApiResponse::error('Kateqoriya adı boş ola bilməz', 422);
         }
+
+        $dup = $this->pdo->prepare('SELECT id FROM product_categories WHERE business_id = 1 AND LOWER(name) = LOWER(?)');
+        $dup->execute([$name]);
+        if ($dup->fetch()) {
+            return ApiResponse::error('Bu adlı kateqoriya artıq var', 409);
+        }
+
         $this->pdo->prepare(
             'INSERT INTO product_categories (business_id, name, sort_order, created_at, updated_at) VALUES (1, ?, ?, NOW(), NOW())'
-        )->execute([$body['name'], (int) ($body['sort_order'] ?? 0)]);
+        )->execute([$name, (int) ($body['sort_order'] ?? 0)]);
 
-        return ApiResponse::success(['id' => (int) $this->pdo->lastInsertId()], [], 201);
+        $id = (int) $this->pdo->lastInsertId();
+
+        return ApiResponse::success($this->findCategory($id), [], 201);
+    }
+
+    public function updateCategory(Request $request, Response $response, array $args): Response
+    {
+        $id = (int) $args['id'];
+        $category = $this->findCategory($id);
+        if (!$category) {
+            return ApiResponse::error('Kateqoriya tapılmadı', 404);
+        }
+
+        $body = (array) $request->getParsedBody();
+        $fields = [];
+        $params = [];
+
+        if (array_key_exists('name', $body)) {
+            $name = trim((string) $body['name']);
+            if ($name === '') {
+                return ApiResponse::error('Kateqoriya adı boş ola bilməz', 422);
+            }
+            $dup = $this->pdo->prepare(
+                'SELECT id FROM product_categories WHERE business_id = 1 AND LOWER(name) = LOWER(?) AND id != ?'
+            );
+            $dup->execute([$name, $id]);
+            if ($dup->fetch()) {
+                return ApiResponse::error('Bu adlı kateqoriya artıq var', 409);
+            }
+            $fields[] = 'name = ?';
+            $params[] = $name;
+        }
+
+        if (array_key_exists('sort_order', $body)) {
+            $fields[] = 'sort_order = ?';
+            $params[] = (int) $body['sort_order'];
+        }
+
+        if ($fields === []) {
+            return ApiResponse::error('Yenilənəcək sahə yoxdur', 422);
+        }
+
+        $fields[] = 'updated_at = NOW()';
+        $params[] = $id;
+        $this->pdo->prepare('UPDATE product_categories SET ' . implode(', ', $fields) . ' WHERE id = ?')->execute($params);
+
+        return ApiResponse::success($this->findCategory($id));
+    }
+
+    public function destroyCategory(Request $request, Response $response, array $args): Response
+    {
+        $id = (int) $args['id'];
+        if (!$this->findCategory($id)) {
+            return ApiResponse::error('Kateqoriya tapılmadı', 404);
+        }
+
+        $count = $this->pdo->prepare('SELECT COUNT(*) FROM products WHERE category_id = ? AND is_active = 1');
+        $count->execute([$id]);
+        if ((int) $count->fetchColumn() > 0) {
+            return ApiResponse::error('Kateqoriyada məhsul var — əvvəlcə məhsulları başqa kateqoriyaya köçürün', 409);
+        }
+
+        $this->pdo->prepare('DELETE FROM product_categories WHERE id = ?')->execute([$id]);
+
+        return ApiResponse::success(['deleted' => true]);
+    }
+
+    private function findCategory(int $id): ?array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT pc.*, COUNT(p.id) AS product_count
+             FROM product_categories pc
+             LEFT JOIN products p ON p.category_id = pc.id AND p.is_active = 1
+             WHERE pc.id = ?
+             GROUP BY pc.id'
+        );
+        $stmt->execute([$id]);
+
+        return $stmt->fetch() ?: null;
     }
 
     public function index(Request $request, Response $response): Response

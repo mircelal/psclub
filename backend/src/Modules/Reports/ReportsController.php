@@ -112,8 +112,13 @@ final class ReportsController
         );
         $topProducts->execute([$from, $to]);
 
-        $active = $this->pdo->query(
-            "SELECT COUNT(*) AS cnt FROM sessions WHERE status IN ('active','paused')"
+        $activeTable = $this->pdo->query(
+            "SELECT COUNT(*) AS cnt FROM sessions
+             WHERE status IN ('active','paused') AND table_id IS NOT NULL"
+        )->fetch();
+        $activeCounter = $this->pdo->query(
+            "SELECT COUNT(*) AS cnt FROM sessions
+             WHERE status IN ('active','paused') AND table_id IS NULL"
         )->fetch();
 
         $payments = $this->pdo->prepare(
@@ -133,7 +138,9 @@ final class ReportsController
             'daily_trend' => $daily->fetchAll(),
             'top_products' => $topProducts->fetchAll(),
             'payment_methods' => $payments->fetchAll(),
-            'active_sessions' => (int) ($active['cnt'] ?? 0),
+            'active_sessions' => (int) ($activeTable['cnt'] ?? 0) + (int) ($activeCounter['cnt'] ?? 0),
+            'active_table_sessions' => (int) ($activeTable['cnt'] ?? 0),
+            'active_counter_sessions' => (int) ($activeCounter['cnt'] ?? 0),
         ]);
     }
 

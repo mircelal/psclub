@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../services/pos_service.dart';
+import 'media_url.dart';
 import 'venue_labels.dart';
 
 class BusinessConfig {
@@ -57,7 +58,7 @@ class BusinessConfig {
       billingMode: biz['billing_mode']?.toString() ?? 'per_minute',
       timeBillingEnabled: timeBilling == null || timeBilling == true || timeBilling == 1 || timeBilling == '1',
       venueType: venueType,
-      logoUrl: biz['logo_url']?.toString(),
+      logoUrl: MediaUrl.resolve(biz['logo_url']?.toString()),
       receiptHeader: settings['receipt_header']?.toString() ?? biz['name']?.toString() ?? '',
       receiptFooter: settings['receipt_footer']?.toString() ?? '',
       labels: VenueLabels.fromType(venueType),

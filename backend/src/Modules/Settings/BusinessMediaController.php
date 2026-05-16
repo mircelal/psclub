@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Modules\Settings;
 
 use App\Support\ApiResponse;
+use App\Support\MediaUrl;
 use PDO;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -23,9 +24,9 @@ final class BusinessMediaController
             return ApiResponse::error('No logo', 404);
         }
 
-        $filename = basename(parse_url($url, PHP_URL_PATH) ?: '');
-        $path = __DIR__ . '/../../../storage/business/' . $filename;
-        if (!is_file($path)) {
+        $dir = __DIR__ . '/../../../storage/business';
+        $path = $this->resolveLogoPath($dir);
+        if ($path === null) {
             return ApiResponse::error('Not found', 404);
         }
 
@@ -57,12 +58,25 @@ final class BusinessMediaController
         $filename = 'logo.' . ($ext === 'jpeg' ? 'jpg' : $ext);
         $file->moveTo($dir . '/' . $filename);
 
-        $baseUrl = rtrim($_ENV['APP_URL'] ?? 'http://127.0.0.1:8080', '/');
-        $url = $baseUrl . '/api/media/business/logo';
+        $url = MediaUrl::businessLogo();
 
         $this->pdo->prepare('UPDATE businesses SET logo_url = ?, updated_at = NOW() WHERE id = 1')
             ->execute([$url]);
 
         return ApiResponse::success(['logo_url' => $url]);
+    }
+
+    private function resolveLogoPath(string $dir): ?string
+    {
+        foreach (['logo.jpg', 'logo.jpeg', 'logo.png', 'logo.webp', 'logo.gif'] as $name) {
+            $candidate = $dir . '/' . $name;
+            if (is_file($candidate)) {
+                return $candidate;
+            }
+        }
+
+        $matches = glob($dir . '/logo.*') ?: [];
+
+        return $matches[0] ?? null;
     }
 }

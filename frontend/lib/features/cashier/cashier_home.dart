@@ -26,6 +26,8 @@ import 'widgets/table_context_menu.dart';
 import 'widgets/table_session_state.dart';
 import 'cashier_shortcuts.dart';
 import 'widgets/tables_layout.dart';
+import 'shift_provider.dart';
+import 'shift_dialogs.dart';
 
 final tablesProvider = FutureProvider.autoDispose<List<dynamic>>((ref) async {
   return ref.read(posServiceProvider).getTables();
@@ -44,15 +46,18 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
   Timer? _tickTimer;
   int _tick = 0;
   CashierTableFilter _filter = CashierTableFilter.all;
+  bool _shiftGateShown = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(productsProvider.future);
+      _maybePromptOpenShift();
     });
     _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) {
       ref.invalidate(tablesProvider);
+      ref.invalidate(currentShiftProvider);
     });
     _tickTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _tick++);
@@ -139,6 +144,30 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
 
   void _refresh() {
     ref.invalidate(tablesProvider);
+    ref.invalidate(currentShiftProvider);
+  }
+
+  Future<void> _maybePromptOpenShift() async {
+    final user = ref.read(authProvider).valueOrNull;
+    if (user?.isAdmin == true || _shiftGateShown || !mounted) return;
+
+    final shift = await ref.read(currentShiftProvider.future);
+    if (shift != null || !mounted) return;
+
+    _shiftGateShown = true;
+    await showOpenShiftDialog(context, ref);
+  }
+
+  Future<void> _handleOpenShift() async {
+    await showOpenShiftDialog(context, ref);
+  }
+
+  Future<void> _handleCashMovement(Map<String, dynamic> shift) async {
+    await showCashMovementDialog(context, ref, shift['id'] as int);
+  }
+
+  Future<void> _handleCloseShift(Map<String, dynamic> shift) async {
+    await showCloseShiftDialog(context, ref, shift);
   }
 
   double _liveRevenue(List<Map<String, dynamic>> list) {
@@ -156,14 +185,16 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
   @override
   Widget build(BuildContext context) {
     final user = ref.watch(authProvider).valueOrNull;
+    final shiftAsync = ref.watch(currentShiftProvider);
+    final currentShift = shiftAsync.valueOrNull;
     final tablesAsync = ref.watch(tablesProvider);
     final uiSettings = ref.watch(appSettingsProvider).valueOrNull;
     final viewMode = uiSettings?.tableViewMode ?? TableViewMode.grid;
     final biz = ref.watch(businessConfigProvider).valueOrNull ?? BusinessConfig.fallback;
 
     final list = tablesAsync.valueOrNull?.cast<Map<String, dynamic>>() ?? [];
-    final active = list.where((t) => t['status'] == 'active' || t['status'] == 'paused').length;
-    final empty = list.where((t) => t['status'] == 'empty').length;
+    final active = list.where((t) => t['session_id'] != null).length;
+    final empty = list.where((t) => t['session_id'] == null).length;
     final revenue = _liveRevenue(list);
 
     final isAdmin = user?.isAdmin == true;
@@ -178,6 +209,10 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
         total: list.length,
         liveRevenue: revenue,
         filter: _filter,
+        shift: currentShift,
+        onOpenShift: _handleOpenShift,
+        onCashMovement: currentShift != null ? () => _handleCashMovement(currentShift) : null,
+        onCloseShift: currentShift != null ? () => _handleCloseShift(currentShift) : null,
         onFilterChanged: (f) {
           setState(() => _filter = f);
           if (inDrawer) _scaffoldKey.currentState?.closeDrawer();

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../config/media_url.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_palette.dart';
 import '../theme/app_spacing.dart';
@@ -20,7 +21,7 @@ class ProductImage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    final url = imageUrl?.trim();
+    final url = MediaUrl.resolve(imageUrl);
     if (url != null && url.isNotEmpty) {
       return ClipRRect(
         borderRadius: BorderRadius.circular(radius),

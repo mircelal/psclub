@@ -1,8 +1,11 @@
+import 'dart:io';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/about/app_about.dart';
 import '../../core/config/business_config_provider.dart';
+import '../../core/config/media_url.dart';
 import '../../core/config/venue_labels.dart';
 import '../../core/settings/app_settings.dart';
 import '../../core/settings/desktop_window_service.dart';
@@ -32,6 +35,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   final _headerCtrl = TextEditingController();
   final _footerCtrl = TextEditingController();
   String? _logoUrl;
+  String? _localLogoPath;
   bool _loading = true;
   bool _saving = false;
 
@@ -60,7 +64,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _venueType = biz['venue_type']?.toString() ?? 'gaming';
     final tb = biz['time_billing_enabled'];
     _timeBillingEnabled = tb == null || tb == true || tb == 1 || tb == '1';
-    _logoUrl = biz['logo_url']?.toString();
+    _logoUrl = MediaUrl.resolve(biz['logo_url']?.toString());
+    _localLogoPath = null;
     final settings = _data!['settings'] as Map<String, dynamic>? ?? {};
     _headerCtrl.text = settings['receipt_header']?.toString() ?? _nameCtrl.text;
     _footerCtrl.text = settings['receipt_footer']?.toString() ?? '';
@@ -70,14 +75,45 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Future<void> _pickLogo() async {
     final result = await FilePicker.platform.pickFiles(type: FileType.image, withData: false);
     if (result == null || result.files.single.path == null) return;
+    final path = result.files.single.path!;
+    setState(() => _localLogoPath = path);
     try {
-      final url = await ref.read(posServiceProvider).uploadBusinessLogo(result.files.single.path!);
-      setState(() => _logoUrl = url);
+      final url = await ref.read(posServiceProvider).uploadBusinessLogo(path);
+      setState(() {
+        _logoUrl = MediaUrl.resolve(url);
+        _localLogoPath = null;
+      });
       ref.invalidate(businessConfigProvider);
       if (mounted) showAppSnackBar(context, 'Logo yükləndi');
     } catch (e) {
-      if (mounted) showAppSnackBar(context, e.toString(), isError: true);
+      if (mounted) {
+        setState(() => _localLogoPath = null);
+        showAppSnackBar(context, e.toString(), isError: true);
+      }
     }
+  }
+
+  Widget _logoPreview() {
+    if (_localLogoPath != null) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        child: Image.file(File(_localLogoPath!), width: 72, height: 72, fit: BoxFit.cover),
+      );
+    }
+    final url = MediaUrl.resolve(_logoUrl);
+    if (url != null && url.isNotEmpty) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        child: Image.network(
+          url,
+          width: 72,
+          height: 72,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => const BusinessLogo(size: 72),
+        ),
+      );
+    }
+    return const BusinessLogo(size: 72);
   }
 
   Future<void> _save() async {
@@ -129,13 +165,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 children: [
                   Row(
                     children: [
-                      if (_logoUrl != null && _logoUrl!.isNotEmpty)
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-                          child: Image.network(_logoUrl!, width: 72, height: 72, fit: BoxFit.cover),
-                        )
-                      else
-                        const BusinessLogo(size: 72),
+                      _logoPreview(),
                       const SizedBox(width: AppSpacing.lg),
                       Expanded(
                         child: OutlinedButton.icon(

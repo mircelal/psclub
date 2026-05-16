@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../config/business_config_provider.dart';
+import '../config/media_url.dart';
 
 class BusinessLogo extends ConsumerWidget {
   const BusinessLogo({super.key, this.size = 28, this.fallbackIcon});
@@ -11,7 +12,7 @@ class BusinessLogo extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final config = ref.watch(businessConfigProvider).valueOrNull ?? BusinessConfig.fallback;
-    final url = config.logoUrl;
+    final url = MediaUrl.resolve(config.logoUrl);
 
     if (url != null && url.isNotEmpty) {
       return ClipRRect(

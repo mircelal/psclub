@@ -33,6 +33,23 @@ class PosService {
     return res['data'] as List<dynamic>;
   }
 
+  Future<Map<String, dynamic>> createProductCategory(String name, {int sortOrder = 0}) async {
+    final res = await _api.post('/product-categories', data: {
+      'name': name,
+      'sort_order': sortOrder,
+    });
+    return res['data'] as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> updateProductCategory(int id, Map<String, dynamic> data) async {
+    final res = await _api.put('/product-categories/$id', data: data);
+    return res['data'] as Map<String, dynamic>;
+  }
+
+  Future<void> deleteProductCategory(int id) async {
+    await _api.delete('/product-categories/$id');
+  }
+
   Future<List<dynamic>> getActiveSessions() async {
     final res = await _api.get('/sessions/active');
     return res['data'] as List<dynamic>;
@@ -335,6 +352,85 @@ class PosService {
 
   Future<Map<String, dynamic>> refundOrder(int id, Map<String, dynamic> data) async {
     final res = await _api.post('/orders/$id/refund', data: data);
+    return res['data'] as Map<String, dynamic>;
+  }
+
+  // Növbə / kassa
+  Future<Map<String, dynamic>?> getCurrentShift() async {
+    final res = await _api.get('/shifts/current');
+    return res['data'] as Map<String, dynamic>?;
+  }
+
+  Future<Map<String, dynamic>> openShift(double openingCash) async {
+    final res = await _api.post('/shifts/open', data: {'opening_cash': openingCash});
+    return res['data'] as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> closeShift(int id, {required double closingCash, String? notes}) async {
+    final res = await _api.post('/shifts/$id/close', data: {
+      'closing_cash': closingCash,
+      if (notes != null && notes.isNotEmpty) 'notes': notes,
+    });
+    return res['data'] as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> addShiftMovement(
+    int shiftId, {
+    required String type,
+    required double amount,
+    String? category,
+    String? description,
+  }) async {
+    final res = await _api.post('/shifts/$shiftId/movements', data: {
+      'type': type,
+      'amount': amount,
+      if (category != null) 'category': category,
+      if (description != null && description.isNotEmpty) 'description': description,
+    });
+    return res['data'] as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> getShiftCategories() async {
+    final res = await _api.get('/shifts/categories');
+    return res['data'] as Map<String, dynamic>;
+  }
+
+  Future<List<dynamic>> getShifts({String? from, String? to, String? status}) async {
+    final res = await _api.get('/shifts', query: {
+      if (from != null) 'from': from,
+      if (to != null) 'to': to,
+      if (status != null) 'status': status,
+    });
+    return res['data'] as List<dynamic>;
+  }
+
+  Future<Map<String, dynamic>> getShift(int id) async {
+    final res = await _api.get('/shifts/$id');
+    return res['data'] as Map<String, dynamic>;
+  }
+
+  Future<List<dynamic>> getCashMovements({String? from, String? to}) async {
+    final res = await _api.get('/cash-movements', query: {
+      if (from != null) 'from': from,
+      if (to != null) 'to': to,
+    });
+    return res['data'] as List<dynamic>;
+  }
+
+  Future<Map<String, dynamic>> addAdminExpense({
+    required String type,
+    required double amount,
+    String? category,
+    String? description,
+    int? shiftId,
+  }) async {
+    final res = await _api.post('/cash-expenses', data: {
+      'type': type,
+      'amount': amount,
+      if (category != null) 'category': category,
+      if (description != null && description.isNotEmpty) 'description': description,
+      if (shiftId != null) 'shift_id': shiftId,
+    });
     return res['data'] as Map<String, dynamic>;
   }
 }

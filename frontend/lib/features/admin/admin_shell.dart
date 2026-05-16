@@ -12,6 +12,7 @@ import '../../core/theme/cashier_theme.dart';
 import '../../core/theme/cashier_theme_data.dart';
 import '../../core/widgets/business_logo.dart';
 import 'audit_screen.dart';
+import 'shifts_screen.dart';
 import 'dashboard_screen.dart';
 import 'orders_screen.dart';
 import 'products_screen.dart';
@@ -45,7 +46,8 @@ class _AdminShellState extends ConsumerState<AdminShell> {
     (Icons.people_outline, Icons.people_rounded, 'İstifadəçilər'),
     (Icons.tune_outlined, Icons.tune_rounded, 'Parametrlər'),
     (Icons.bar_chart_outlined, Icons.bar_chart_rounded, 'Hesabatlar'),
-    (Icons.history_outlined, Icons.history_rounded, 'Audit'),
+    (Icons.point_of_sale_outlined, Icons.point_of_sale_rounded, 'Növbə / Kassa'),
+    (Icons.history_outlined, Icons.history_rounded, 'Jurnal'),
   ];
 
   Widget _page(int i) => switch (i) {
@@ -59,7 +61,8 @@ class _AdminShellState extends ConsumerState<AdminShell> {
         7 => const UsersScreen(),
         8 => const SettingsScreen(),
         9 => const ReportsScreen(),
-        10 => const AuditScreen(),
+        10 => const ShiftsScreen(),
+        11 => const AuditScreen(),
         _ => const SizedBox(),
       };
 
@@ -160,7 +163,7 @@ class _AdminShellState extends ConsumerState<AdminShell> {
       (7, Icons.people_rounded, 'İstifadəçilər'),
       (8, Icons.tune_rounded, 'Parametrlər'),
       (9, Icons.bar_chart_rounded, 'Hesabatlar'),
-      (10, Icons.history_rounded, 'Audit'),
+      (10, Icons.history_rounded, 'Əməliyyat jurnalı'),
     ];
 
     showModalBottomSheet(

@@ -5,6 +5,7 @@ import '../../../core/theme/cashier_theme.dart';
 import '../../../core/widgets/business_logo.dart';
 import 'cashier_filter_bar.dart';
 import 'cashier_stats_row.dart';
+import 'shift_rail_card.dart';
 
 class CashierSideRail extends StatelessWidget {
   const CashierSideRail({
@@ -24,6 +25,10 @@ class CashierSideRail extends StatelessWidget {
     required this.onShowShortcuts,
     required this.onLogout,
     this.onAdmin,
+    this.shift,
+    this.onOpenShift,
+    this.onCashMovement,
+    this.onCloseShift,
   });
 
   final BusinessConfig biz;
@@ -40,6 +45,10 @@ class CashierSideRail extends StatelessWidget {
   final VoidCallback onShowShortcuts;
   final VoidCallback onLogout;
   final VoidCallback? onAdmin;
+  final Map<String, dynamic>? shift;
+  final VoidCallback? onOpenShift;
+  final VoidCallback? onCashMovement;
+  final VoidCallback? onCloseShift;
 
   /// Drawer içində — eni parent-ə uyğun.
   final bool inDrawer;
@@ -88,6 +97,16 @@ class CashierSideRail extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
                       child: _UserTile(name: userName),
                     ),
+                    if (onOpenShift != null) ...[
+                      const SizedBox(height: AppSpacing.md),
+                      ShiftRailCard(
+                        biz: biz,
+                        shift: shift,
+                        onOpenShift: onOpenShift!,
+                        onCashMovement: onCashMovement ?? () {},
+                        onCloseShift: onCloseShift ?? () {},
+                      ),
+                    ],
                     const SizedBox(height: AppSpacing.lg),
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),

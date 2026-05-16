@@ -110,17 +110,18 @@ class AppTextField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return TextField(
       controller: controller,
       obscureText: obscureText,
       keyboardType: keyboardType,
       autofocus: autofocus,
       onSubmitted: onSubmitted,
-      style: const TextStyle(fontSize: 15),
+      style: TextStyle(fontSize: 15, color: scheme.onSurface),
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
-        prefixIcon: prefixIcon != null ? Icon(prefixIcon, size: 20, color: AppColors.textMuted) : null,
+        prefixIcon: prefixIcon != null ? Icon(prefixIcon, size: 20, color: scheme.onSurfaceVariant) : null,
       ),
     );
   }
