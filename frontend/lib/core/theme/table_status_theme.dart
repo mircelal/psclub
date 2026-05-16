@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'app_palette.dart';
+import 'brand_colors.dart';
 import 'cashier_theme.dart';
 
 /// Masa kartı — status rəngi hiss olunur, premium pastel.
@@ -81,13 +82,13 @@ abstract final class TableStatusTheme {
           cardShadow: shadow,
         ),
       _ => TableStatusStyle(
-          accent: CashierTheme.statusEmpty,
-          cardFill: const Color(0xFFF4FBF6),
-          cardBorder: const Color(0xFFB8DFC6),
-          badgeFill: const Color(0xFFE6F5EA),
-          badgeBorder: const Color(0xFFC8E8D0),
-          timerZoneFill: const Color(0xFFECF6EF),
-          moneyColor: CashierTheme.lightTextPrimary,
+          accent: BrandColors.brightBlue,
+          cardFill: const Color(0xFFF0F6FF),
+          cardBorder: const Color(0xFFB8D4F5),
+          badgeFill: const Color(0xFFE3EEFC),
+          badgeBorder: const Color(0xFFC5D9F5),
+          timerZoneFill: const Color(0xFFE8F2FD),
+          moneyColor: BrandColors.navy,
           cardShadow: shadow,
         ),
     };
@@ -126,12 +127,12 @@ abstract final class TableStatusTheme {
           cardShadow: shadow,
         ),
       _ => TableStatusStyle(
-          accent: const Color(0xFF6BCB7E),
-          cardFill: Color.lerp(p.surfaceElevated, const Color(0xFF6BCB7E), 0.08)!,
-          cardBorder: const Color(0xFF6BCB7E).withValues(alpha: 0.30),
-          badgeFill: const Color(0xFF6BCB7E).withValues(alpha: 0.12),
-          badgeBorder: const Color(0xFF6BCB7E).withValues(alpha: 0.22),
-          timerZoneFill: const Color(0xFF6BCB7E).withValues(alpha: 0.06),
+          accent: BrandColors.brightBlue,
+          cardFill: Color.lerp(p.surfaceElevated, BrandColors.brightBlue, 0.10)!,
+          cardBorder: BrandColors.brightBlue.withValues(alpha: 0.35),
+          badgeFill: BrandColors.brightBlue.withValues(alpha: 0.14),
+          badgeBorder: BrandColors.brightBlue.withValues(alpha: 0.28),
+          timerZoneFill: BrandColors.brightBlue.withValues(alpha: 0.08),
           moneyColor: CashierTheme.darkTextPrimary,
           cardShadow: shadow,
         ),

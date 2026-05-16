@@ -3,6 +3,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../utils/phone_utils.dart';
 import '../widgets/app_dialog.dart';
+import 'phone_text_field.dart';
 import '../../services/pos_service.dart';
 
 /// Kassir üçün müştəri seçimi: axtarış + yeni müştəri (+).
@@ -77,7 +78,7 @@ class _CustomerPickerState extends State<CustomerPicker> {
 
   Future<void> _createNew() async {
     final nameCtrl = TextEditingController();
-    final phoneCtrl = TextEditingController(text: '+994');
+    final phoneCtrl = TextEditingController(text: PhoneUtils.fieldValue());
     final created = await showAppDialog<Map<String, dynamic>>(
       context: context,
       title: 'Yeni müştəri',
@@ -88,12 +89,7 @@ class _CustomerPickerState extends State<CustomerPicker> {
         children: [
           AppTextField(controller: nameCtrl, label: 'Ad soyad', autofocus: true),
           const SizedBox(height: AppSpacing.lg),
-          AppTextField(
-            controller: phoneCtrl,
-            label: 'Telefon',
-            hint: PhoneUtils.displayHint(),
-            keyboardType: TextInputType.phone,
-          ),
+          PhoneTextField(controller: phoneCtrl),
         ],
       ),
       actions: [
@@ -103,7 +99,11 @@ class _CustomerPickerState extends State<CustomerPicker> {
             final phone = PhoneUtils.normalize(phoneCtrl.text);
             if (nameCtrl.text.trim().isEmpty || phone == null) {
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Ad və düzgün telefon (+994...) daxil edin')),
+                SnackBar(
+                  content: Text(
+                    phone == null ? PhoneUtils.validationMessage(phoneCtrl.text) : 'Ad daxil edin',
+                  ),
+                ),
               );
               return;
             }

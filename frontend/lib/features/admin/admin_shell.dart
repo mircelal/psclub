@@ -1,11 +1,16 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/auth/auth_state.dart';
+import '../../core/config/business_config_provider.dart';
 import '../../core/settings/ui_settings_sheet.dart';
-import '../../core/theme/app_colors.dart';
-import '../../core/theme/app_palette.dart';
+import '../../core/theme/admin_theme.dart';
 import '../../core/theme/app_spacing.dart';
+import '../../core/theme/brand_colors.dart';
+import '../../core/theme/cashier_theme.dart';
+import '../../core/theme/cashier_theme_data.dart';
+import '../../core/widgets/business_logo.dart';
 import 'audit_screen.dart';
 import 'dashboard_screen.dart';
 import 'orders_screen.dart';
@@ -26,20 +31,21 @@ class AdminShell extends ConsumerStatefulWidget {
 }
 
 class _AdminShellState extends ConsumerState<AdminShell> {
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
   int _index = 0;
 
   static const _destinations = [
-    (Icons.dashboard_outlined, Icons.dashboard, 'Statistika'),
-    (Icons.receipt_long_outlined, Icons.receipt_long, 'Sifarişlər'),
-    (Icons.table_bar_outlined, Icons.table_bar, 'Masalar'),
-    (Icons.inventory_2_outlined, Icons.inventory_2, 'Məhsullar'),
-    (Icons.restaurant_menu_outlined, Icons.restaurant_menu, 'Paketlər'),
-    (Icons.contacts_outlined, Icons.contacts, 'Müştərilər'),
-    (Icons.warehouse_outlined, Icons.warehouse, 'Stok'),
-    (Icons.people_outline, Icons.people, 'İstifadəçilər'),
-    (Icons.tune_outlined, Icons.tune, 'Parametrlər'),
-    (Icons.bar_chart_outlined, Icons.bar_chart, 'Hesabatlar'),
-    (Icons.history_outlined, Icons.history, 'Audit'),
+    (Icons.dashboard_outlined, Icons.dashboard_rounded, 'Statistika'),
+    (Icons.receipt_long_outlined, Icons.receipt_long_rounded, 'Sifarişlər'),
+    (Icons.table_bar_outlined, Icons.table_bar_rounded, 'Masalar'),
+    (Icons.inventory_2_outlined, Icons.inventory_2_rounded, 'Məhsullar'),
+    (Icons.restaurant_menu_outlined, Icons.restaurant_menu_rounded, 'Paketlər'),
+    (Icons.contacts_outlined, Icons.contacts_rounded, 'Müştərilər'),
+    (Icons.warehouse_outlined, Icons.warehouse_rounded, 'Stok'),
+    (Icons.people_outline, Icons.people_rounded, 'İstifadəçilər'),
+    (Icons.tune_outlined, Icons.tune_rounded, 'Parametrlər'),
+    (Icons.bar_chart_outlined, Icons.bar_chart_rounded, 'Hesabatlar'),
+    (Icons.history_outlined, Icons.history_rounded, 'Audit'),
   ];
 
   Widget _page(int i) => switch (i) {
@@ -59,65 +65,144 @@ class _AdminShellState extends ConsumerState<AdminShell> {
 
   @override
   Widget build(BuildContext context) {
-    final wide = MediaQuery.sizeOf(context).width >= 900;
+    final width = MediaQuery.sizeOf(context).width;
+    final wide = width >= 900;
+    final mobile = width < 600;
     final user = ref.watch(authProvider).valueOrNull;
 
-    final p = context.palette;
+    void selectPage(int i) {
+      setState(() => _index = i);
+      _scaffoldKey.currentState?.closeDrawer();
+    }
 
-    return Scaffold(
-      backgroundColor: p.bg,
-      body: Row(
-        children: [
-          if (wide) _SideNav(index: _index, onSelect: (i) => setState(() => _index = i)),
-          Expanded(
-            child: Column(
-              children: [
-                _AdminTopBar(
-                  title: _destinations[_index].$3,
-                  userName: user?.username ?? '',
-                  onSettings: () => showUiSettingsSheet(context),
-                  onCashier: () => context.go('/cashier'),
-                  onLogout: () => ref.read(authProvider.notifier).logout(),
-                ),
-                Expanded(child: _page(_index)),
-              ],
+    return CashierThemeData.wrap(
+      context,
+      Scaffold(
+        key: _scaffoldKey,
+        backgroundColor: CashierTheme.scaffoldBg(context),
+        drawer: !wide
+            ? Drawer(
+                width: math.min(width * 0.88, 300.0),
+                backgroundColor: CashierTheme.surfaceSidebar(context),
+                child: _SideNav(index: _index, onSelect: selectPage),
+              )
+            : null,
+        body: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (wide) _SideNav(index: _index, onSelect: (i) => setState(() => _index = i)),
+            Expanded(
+              child: Column(
+                children: [
+                  _AdminTopBar(
+                    title: _destinations[_index].$3,
+                    userName: user?.fullName ?? user?.username ?? '',
+                    compact: mobile,
+                    onMenuTap: !wide ? () => _scaffoldKey.currentState?.openDrawer() : null,
+                    onSettings: () => showUiSettingsSheet(context),
+                    onCashier: () => context.go('/cashier'),
+                    onLogout: () => ref.read(authProvider.notifier).logout(),
+                  ),
+                  Expanded(
+                    child: ColoredBox(
+                      color: CashierTheme.surfaceMain(context),
+                      child: _page(_index),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
+        bottomNavigationBar: wide
+            ? null
+            : NavigationBar(
+                selectedIndex: _index.clamp(0, 3),
+                onDestinationSelected: (i) {
+                  if (i == 3) {
+                    _showMoreMenu(context);
+                  } else {
+                    setState(() => _index = i);
+                  }
+                },
+                destinations: const [
+                  NavigationDestination(
+                    icon: Icon(Icons.dashboard_outlined),
+                    selectedIcon: Icon(Icons.dashboard_rounded),
+                    label: 'Stat',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.receipt_long_outlined),
+                    selectedIcon: Icon(Icons.receipt_long_rounded),
+                    label: 'Sifariş',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.contacts_outlined),
+                    selectedIcon: Icon(Icons.contacts_rounded),
+                    label: 'Müştəri',
+                  ),
+                  NavigationDestination(icon: Icon(Icons.more_horiz_rounded), label: 'Digər'),
+                ],
+              ),
       ),
-      bottomNavigationBar: wide
-          ? null
-          : NavigationBar(
-              selectedIndex: _index.clamp(0, 3),
-              onDestinationSelected: (i) {
-                if (i == 3) _showMoreMenu(context);
-                else setState(() => _index = i);
-              },
-              destinations: const [
-                NavigationDestination(icon: Icon(Icons.table_bar_outlined), selectedIcon: Icon(Icons.table_bar), label: 'Masalar'),
-                NavigationDestination(icon: Icon(Icons.inventory_2_outlined), selectedIcon: Icon(Icons.inventory_2), label: 'Məhsul'),
-                NavigationDestination(icon: Icon(Icons.warehouse_outlined), selectedIcon: Icon(Icons.warehouse), label: 'Stok'),
-                NavigationDestination(icon: Icon(Icons.more_horiz), label: 'Digər'),
-              ],
-            ),
     );
   }
 
   void _showMoreMenu(BuildContext context) {
+    final items = [
+      (0, Icons.dashboard_rounded, 'Statistika'),
+      (1, Icons.receipt_long_rounded, 'Sifarişlər'),
+      (2, Icons.table_bar_rounded, 'Masalar'),
+      (3, Icons.inventory_2_rounded, 'Məhsullar'),
+      (4, Icons.restaurant_menu_rounded, 'Paketlər'),
+      (5, Icons.contacts_rounded, 'Müştərilər'),
+      (6, Icons.warehouse_rounded, 'Stok'),
+      (7, Icons.people_rounded, 'İstifadəçilər'),
+      (8, Icons.tune_rounded, 'Parametrlər'),
+      (9, Icons.bar_chart_rounded, 'Hesabatlar'),
+      (10, Icons.history_rounded, 'Audit'),
+    ];
+
     showModalBottomSheet(
       context: context,
+      backgroundColor: CashierTheme.surfaceRaised(context),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
       builder: (ctx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(leading: const Icon(Icons.dashboard), title: const Text('Statistika'), onTap: () { Navigator.pop(ctx); setState(() => _index = 0); }),
-            ListTile(leading: const Icon(Icons.receipt_long), title: const Text('Sifarişlər'), onTap: () { Navigator.pop(ctx); setState(() => _index = 1); }),
-            ListTile(leading: const Icon(Icons.restaurant_menu), title: const Text('Paketlər'), onTap: () { Navigator.pop(ctx); setState(() => _index = 4); }),
-            ListTile(leading: const Icon(Icons.contacts), title: const Text('Müştərilər'), onTap: () { Navigator.pop(ctx); setState(() => _index = 5); }),
-            ListTile(leading: const Icon(Icons.people), title: const Text('İstifadəçilər'), onTap: () { Navigator.pop(ctx); setState(() => _index = 7); }),
-            ListTile(leading: const Icon(Icons.tune), title: const Text('Parametrlər'), onTap: () { Navigator.pop(ctx); setState(() => _index = 8); }),
-            ListTile(leading: const Icon(Icons.bar_chart), title: const Text('Hesabatlar'), onTap: () { Navigator.pop(ctx); setState(() => _index = 9); }),
-            ListTile(leading: const Icon(Icons.history), title: const Text('Audit'), onTap: () { Navigator.pop(ctx); setState(() => _index = 10); }),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+              child: Row(
+                children: [
+                  Text('Menyu', style: CashierTheme.stationTitle(ctx, size: 16)),
+                  const Spacer(),
+                  IconButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    icon: const Icon(Icons.close, size: 20),
+                  ),
+                ],
+              ),
+            ),
+            ...items.map(
+              (e) => ListTile(
+                leading: Icon(e.$2, color: _index == e.$1 ? BrandColors.brightBlue : CashierTheme.textSecondary(ctx)),
+                title: Text(
+                  e.$3,
+                  style: TextStyle(
+                    fontWeight: _index == e.$1 ? FontWeight.w600 : FontWeight.w500,
+                    color: _index == e.$1 ? BrandColors.brightBlue : CashierTheme.textPrimary(ctx),
+                  ),
+                ),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  setState(() => _index = e.$1);
+                },
+              ),
+            ),
+            const SizedBox(height: 8),
           ],
         ),
       ),
@@ -125,80 +210,118 @@ class _AdminShellState extends ConsumerState<AdminShell> {
   }
 }
 
-class _SideNav extends StatelessWidget {
+class _SideNav extends ConsumerWidget {
   const _SideNav({required this.index, required this.onSelect});
 
   final int index;
   final ValueChanged<int> onSelect;
 
   @override
-  Widget build(BuildContext context) {
-    final p = context.palette;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final biz = ref.watch(businessConfigProvider).valueOrNull;
 
     return Container(
-      width: 220,
-      decoration: BoxDecoration(
-        color: p.surface,
-        border: Border(right: BorderSide(color: p.border)),
-      ),
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(AppSpacing.xl),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(AppSpacing.sm),
-                  decoration: BoxDecoration(
-                    color: AppColors.primarySoft,
-                    borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+      width: AdminTheme.sideNavWidth,
+      decoration: CashierTheme.sideRailDecoration(context),
+      child: SafeArea(
+        right: false,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, AppSpacing.md),
+              child: Row(
+                children: [
+                  const BusinessLogo(size: 36),
+                  const SizedBox(width: AppSpacing.md),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          biz?.name ?? 'PS Club',
+                          style: CashierTheme.stationTitle(context, size: 14),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 2),
+                        Text('Admin paneli', style: CashierTheme.caption(context)),
+                      ],
+                    ),
                   ),
-                  child: Image.asset('assets/icons/app_icon.png', width: 20, height: 20),
-                ),
-                const SizedBox(width: AppSpacing.md),
-                Text('Admin', style: Theme.of(context).textTheme.titleMedium),
-              ],
+                ],
+              ),
             ),
-          ),
-          const Divider(height: 1),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.symmetric(vertical: AppSpacing.md, horizontal: AppSpacing.sm),
-              children: List.generate(_AdminShellState._destinations.length, (i) {
-                final d = _AdminShellState._destinations[i];
-                final selected = index == i;
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-                  child: Material(
-                    color: selected ? AppColors.primarySoft : Colors.transparent,
-                    borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-                    child: InkWell(
-                      onTap: () => onSelect(i),
-                      borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.md),
-                        child: Row(
-                          children: [
-                            Icon(selected ? d.$2 : d.$1, size: 20, color: selected ? AppColors.primary : AppColors.textMuted),
-                            const SizedBox(width: AppSpacing.md),
-                            Text(
-                              d.$3,
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                                color: selected ? AppColors.primary : AppColors.textSecondary,
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+              child: Text('MENYU', style: CashierTheme.sectionTitle(context)),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
+                children: List.generate(_AdminShellState._destinations.length, (i) {
+                  final d = _AdminShellState._destinations[i];
+                  final selected = index == i;
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Material(
+                      color: selected ? CashierTheme.accentSubtle(context) : Colors.transparent,
+                      borderRadius: BorderRadius.circular(CashierTheme.radiusControl),
+                      child: InkWell(
+                        onTap: () => onSelect(i),
+                        borderRadius: BorderRadius.circular(CashierTheme.radiusControl),
+                        hoverColor: CashierTheme.accentSubtle(context),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          decoration: selected
+                              ? BoxDecoration(
+                                  borderRadius: BorderRadius.circular(CashierTheme.radiusControl),
+                                  border: Border.all(
+                                    color: CashierTheme.accent(context).withValues(alpha: 0.35),
+                                  ),
+                                )
+                              : null,
+                          child: Row(
+                            children: [
+                              Icon(
+                                selected ? d.$2 : d.$1,
+                                size: 20,
+                                color: selected ? BrandColors.brightBlue : CashierTheme.textSecondary(context),
                               ),
-                            ),
-                          ],
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  d.$3,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                                    color: selected
+                                        ? CashierTheme.textPrimary(context)
+                                        : CashierTheme.textSecondary(context),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                );
-              }),
+                  );
+                }),
+              ),
             ),
-          ),
-        ],
+            const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.all(AppSpacing.md),
+              child: Text(
+                'Kassir panelinə keçid üçün yuxarıdakı düymə',
+                style: CashierTheme.caption(context),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -211,6 +334,8 @@ class _AdminTopBar extends StatelessWidget {
     required this.onSettings,
     required this.onCashier,
     required this.onLogout,
+    this.onMenuTap,
+    this.compact = false,
   });
 
   final String title;
@@ -218,37 +343,66 @@ class _AdminTopBar extends StatelessWidget {
   final VoidCallback onSettings;
   final VoidCallback onCashier;
   final VoidCallback onLogout;
+  final VoidCallback? onMenuTap;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
-    final p = context.palette;
-
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxl, vertical: AppSpacing.lg),
-      decoration: BoxDecoration(
-        color: p.surfaceElevated,
-        border: Border(bottom: BorderSide(color: p.border)),
+      decoration: CashierTheme.topBarDecoration(context),
+      padding: EdgeInsets.fromLTRB(
+        compact ? AppSpacing.md : AppSpacing.xl,
+        AppSpacing.md,
+        compact ? AppSpacing.md : AppSpacing.xl,
+        AppSpacing.md,
       ),
       child: SafeArea(
         bottom: false,
         child: Row(
           children: [
-            Text(title, style: Theme.of(context).textTheme.titleLarge),
-            const Spacer(),
-            Text(userName, style: Theme.of(context).textTheme.bodySmall),
-            const SizedBox(width: AppSpacing.lg),
+            if (onMenuTap != null) ...[
+              IconButton(
+                onPressed: onMenuTap,
+                icon: const Icon(Icons.menu_rounded),
+                tooltip: 'Menyu',
+              ),
+              const SizedBox(width: AppSpacing.xs),
+            ],
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: CashierTheme.stationTitle(context, size: compact ? 17 : 20)),
+                  if (!compact && userName.isNotEmpty)
+                    Text(userName, style: CashierTheme.caption(context)),
+                ],
+              ),
+            ),
             IconButton(
               onPressed: onSettings,
               icon: const Icon(Icons.tune_rounded, size: 22),
-              tooltip: 'Tətbiq parametrləri',
+              tooltip: 'Görünüş',
+              color: CashierTheme.textSecondary(context),
             ),
-            OutlinedButton.icon(
-              onPressed: onCashier,
-              icon: const Icon(Icons.point_of_sale_outlined, size: 18),
-              label: const Text('Kassir'),
-            ),
+            if (compact)
+              IconButton(
+                onPressed: onCashier,
+                icon: const Icon(Icons.point_of_sale_outlined, size: 22),
+                tooltip: 'Kassir',
+                color: BrandColors.brightBlue,
+              )
+            else
+              FilledButton.icon(
+                onPressed: onCashier,
+                icon: const Icon(Icons.point_of_sale_outlined, size: 18),
+                label: const Text('Kassir'),
+              ),
             const SizedBox(width: AppSpacing.sm),
-            IconButton(onPressed: onLogout, icon: const Icon(Icons.logout, size: 20), tooltip: 'Çıxış'),
+            IconButton(
+              onPressed: onLogout,
+              icon: Icon(Icons.logout_rounded, size: 20, color: CashierTheme.textSecondary(context)),
+              tooltip: 'Çıxış',
+            ),
           ],
         ),
       ),

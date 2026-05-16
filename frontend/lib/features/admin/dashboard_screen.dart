@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
-import '../../core/theme/app_colors.dart';
+import '../../core/theme/admin_theme.dart';
+import '../../core/theme/brand_colors.dart';
 import '../../core/theme/app_palette.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/utils/json_parse.dart';
@@ -108,13 +109,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             margin: const EdgeInsets.only(bottom: AppSpacing.lg),
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.md),
             decoration: BoxDecoration(
-              color: AppColors.dangerSoft,
+              color: AdminTheme.danger(context).withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-              border: Border.all(color: AppColors.danger.withValues(alpha: 0.3)),
+              border: Border.all(color: AdminTheme.danger(context).withValues(alpha: 0.3)),
             ),
             child: Row(
               children: [
-                const Icon(Icons.circle, size: 10, color: AppColors.danger),
+                Icon(Icons.circle, size: 10, color: AdminTheme.danger(context)),
                 const SizedBox(width: AppSpacing.md),
                 Text('$activeNow aktiv sessiya indi işləyir', style: TextStyle(fontWeight: FontWeight.w600, color: p.textPrimary)),
               ],
@@ -133,10 +134,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               crossAxisSpacing: AppSpacing.md,
               childAspectRatio: cols == 1 ? 2.8 : 2.2,
               children: [
-                _periodCard('Bu gün', today, AppColors.accent),
-                _periodCard('Bu həftə', week, AppColors.primary),
-                _periodCard('Bu ay', month, AppColors.info),
-                _periodCard('Seçilmiş dövr', range, AppColors.success),
+                _periodCard('Bu gün', today, BrandColors.brightBlue),
+                _periodCard('Bu həftə', week, BrandColors.navy),
+                _periodCard('Bu ay', month, AdminTheme.info(context)),
+                _periodCard('Seçilmiş dövr', range, AdminTheme.success(context)),
               ],
             );
           },
@@ -288,7 +289,7 @@ class _DailyChart extends StatelessWidget {
                     child: Container(
                       height: h.clamp(4, 100),
                       decoration: BoxDecoration(
-                        color: AppColors.primary.withValues(alpha: 0.75),
+                        color: BrandColors.brightBlue.withValues(alpha: 0.75),
                         borderRadius: BorderRadius.circular(4),
                       ),
                     ),
@@ -346,10 +347,10 @@ class _TableRevenueList extends StatelessWidget {
                 height: 40,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: AppColors.primarySoft,
+                  color: BrandColors.brightBlue.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
                 ),
-                child: const Icon(Icons.sports_esports, size: 20, color: AppColors.primary),
+                child: Icon(Icons.sports_esports, size: 20, color: BrandColors.brightBlue),
               ),
               const SizedBox(width: AppSpacing.md),
               Expanded(

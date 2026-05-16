@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'app_colors.dart';
+import 'cashier_theme.dart';
 
 class AppPalette {
   const AppPalette({
@@ -24,32 +24,32 @@ class AppPalette {
   final Color textMuted;
   final Color primarySoft;
 
-  static const dark = AppPalette(
-    bg: AppColors.bg,
-    surface: AppColors.surface,
-    surfaceElevated: AppColors.surfaceElevated,
-    border: AppColors.border,
-    borderLight: AppColors.borderLight,
-    textPrimary: AppColors.textPrimary,
-    textSecondary: AppColors.textSecondary,
-    textMuted: AppColors.textMuted,
-    primarySoft: AppColors.primarySoft,
-  );
-
-  static const light = AppPalette(
-    bg: Color(0xFFE8ECF1),
-    surface: Color(0xFFFFFFFF),
-    surfaceElevated: Color(0xFFFFFFFF),
-    border: Color(0xFFC5CED8),
-    borderLight: Color(0xFFB0BBC8),
-    textPrimary: Color(0xFF15202B),
-    textSecondary: Color(0xFF4A5568),
-    textMuted: Color(0xFF718096),
-    primarySoft: Color(0x1A5B4CE6),
-  );
-
   static AppPalette resolve(Brightness brightness) =>
-      brightness == Brightness.dark ? dark : light;
+      brightness == Brightness.dark ? _dark : _light;
+
+  static const _dark = AppPalette(
+    bg: CashierTheme.darkScaffold,
+    surface: CashierTheme.darkSurfaceSidebar,
+    surfaceElevated: CashierTheme.darkSurfaceRaised,
+    border: CashierTheme.darkBorder,
+    borderLight: CashierTheme.darkBorderStrong,
+    textPrimary: CashierTheme.darkTextPrimary,
+    textSecondary: CashierTheme.darkTextSecondary,
+    textMuted: Color(0xFF7A94B8),
+    primarySoft: Color(0x2E2463E7),
+  );
+
+  static const _light = AppPalette(
+    bg: CashierTheme.lightScaffold,
+    surface: CashierTheme.lightSurfaceSidebar,
+    surfaceElevated: CashierTheme.lightSurfaceRaised,
+    border: CashierTheme.lightBorder,
+    borderLight: CashierTheme.lightBorderStrong,
+    textPrimary: CashierTheme.lightTextPrimary,
+    textSecondary: CashierTheme.lightTextSecondary,
+    textMuted: Color(0xFF6B85A3),
+    primarySoft: Color(0x1A2463E7),
+  );
 }
 
 extension PaletteContext on BuildContext {

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
-import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/admin_theme.dart';
 import '../../../core/theme/app_spacing.dart';
+import '../../../core/theme/cashier_theme.dart';
 
 /// Admin shell artıq yuxarıda başlıq göstərir — burada təkrar başlıq yoxdur.
 class AdminPageLayout extends StatelessWidget {
@@ -17,8 +18,6 @@ class AdminPageLayout extends StatelessWidget {
   final String? subtitle;
   final Widget? action;
   final Widget child;
-
-  /// Köhnə tam başlıq (shell xaricində istifadə üçün).
   final bool showInlineHeader;
 
   @override
@@ -36,10 +35,10 @@ class AdminPageLayout extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(title!, style: Theme.of(context).textTheme.headlineMedium),
+                      Text(title!, style: CashierTheme.stationTitle(context, size: 22)),
                       if (subtitle != null) ...[
                         const SizedBox(height: AppSpacing.xs),
-                        Text(subtitle!, style: Theme.of(context).textTheme.bodyMedium),
+                        Text(subtitle!, style: CashierTheme.caption(context)),
                       ],
                     ],
                   ),
@@ -64,7 +63,7 @@ class AdminPageLayout extends StatelessWidget {
               children: [
                 if (subtitle != null)
                   Expanded(
-                    child: Text(subtitle!, style: Theme.of(context).textTheme.bodyMedium),
+                    child: Text(subtitle!, style: CashierTheme.caption(context)),
                   ),
                 if (action != null) ...[
                   if (subtitle != null) const SizedBox(width: AppSpacing.md),
@@ -101,16 +100,12 @@ class AdminListTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       margin: const EdgeInsets.only(bottom: AppSpacing.sm),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceElevated,
-        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-        border: Border.all(color: AppColors.border),
-      ),
+      decoration: CashierTheme.elevatedCardDecoration(context),
       child: Material(
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+          borderRadius: BorderRadius.circular(CashierTheme.radiusCard),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.md),
             child: Row(
@@ -120,10 +115,10 @@ class AdminListTile extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                      Text(title, style: CashierTheme.stationTitle(context, size: 14)),
                       if (subtitle != null) ...[
                         const SizedBox(height: 2),
-                        Text(subtitle!, style: Theme.of(context).textTheme.bodySmall),
+                        Text(subtitle!, style: CashierTheme.caption(context)),
                       ],
                     ],
                   ),
@@ -133,7 +128,7 @@ class AdminListTile extends StatelessWidget {
                   const SizedBox(width: AppSpacing.sm),
                   IconButton(
                     onPressed: onDelete,
-                    icon: const Icon(Icons.delete_outline, size: 20, color: AppColors.danger),
+                    icon: Icon(Icons.delete_outline, size: 20, color: AdminTheme.danger(context)),
                     tooltip: 'Sil',
                   ),
                 ],

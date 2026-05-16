@@ -1,17 +1,19 @@
 import 'package:flutter/material.dart';
+import 'brand_colors.dart';
+import 'cashier_theme.dart';
 
 abstract final class AppColors {
-  static const bg = Color(0xFF0D0F14);
-  static const surface = Color(0xFF151820);
-  static const surfaceElevated = Color(0xFF1C2129);
-  static const surfaceHover = Color(0xFF242A34);
-  static const border = Color(0xFF2A3140);
-  static const borderLight = Color(0xFF353D4D);
+  static const bg = CashierTheme.darkScaffold;
+  static const surface = CashierTheme.darkSurfaceSidebar;
+  static const surfaceElevated = CashierTheme.darkSurfaceRaised;
+  static const surfaceHover = Color(0xFF0D3578);
+  static const border = CashierTheme.darkBorder;
+  static const borderLight = CashierTheme.darkBorderStrong;
 
-  static const primary = Color(0xFF7C5CFC);
-  static const primarySoft = Color(0x337C5CFC);
-  static const accent = Color(0xFF00D4AA);
-  static const accentSoft = Color(0x3300D4AA);
+  static const primary = BrandColors.brightBlue;
+  static const primarySoft = Color(0x332463E7);
+  static const accent = BrandColors.sky;
+  static const accentSoft = Color(0x335B9FEF);
 
   static const textPrimary = Color(0xFFF4F6FA);
   static const textSecondary = Color(0xFF9AA3B2);

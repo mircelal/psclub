@@ -10,12 +10,14 @@ class CashierFilterBar extends StatelessWidget {
     required this.onChanged,
     required this.unitLabel,
     this.compact = false,
+    this.horizontalScroll = false,
   });
 
   final CashierTableFilter filter;
   final ValueChanged<CashierTableFilter> onChanged;
   final String unitLabel;
   final bool compact;
+  final bool horizontalScroll;
 
   @override
   Widget build(BuildContext context) {
@@ -32,15 +34,29 @@ class CashierFilterBar extends StatelessWidget {
       );
     }
 
+    final filterWidget = _SegmentedFilter(selected: filter, onChanged: onChanged);
+
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
-      child: Row(
-        children: [
-          Text(unitLabel, style: CashierTheme.stationTitle(context, size: 18)),
-          const Spacer(),
-          _SegmentedFilter(selected: filter, onChanged: onChanged),
-        ],
-      ),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+      child: horizontalScroll
+          ? SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: filterWidget,
+            )
+          : Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    unitLabel,
+                    style: CashierTheme.stationTitle(context, size: 16),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                filterWidget,
+              ],
+            ),
     );
   }
 }

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import '../theme/app_colors.dart';
-import '../theme/app_palette.dart';
 import '../theme/app_spacing.dart';
+import '../theme/brand_colors.dart';
+import '../theme/cashier_theme.dart';
 import 'money_text.dart';
 
 class StatCard extends StatelessWidget {
@@ -22,28 +22,28 @@ class StatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final p = context.palette;
-    final accent = color ?? AppColors.primary;
+    final accent = color ?? BrandColors.brightBlue;
     return Container(
       padding: const EdgeInsets.all(AppSpacing.lg),
-      decoration: BoxDecoration(
-        color: p.surfaceElevated,
-        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-        border: Border.all(color: p.border),
-        boxShadow: Theme.of(context).brightness == Brightness.light
-            ? [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8, offset: const Offset(0, 2))]
-            : null,
-      ),
+      decoration: CashierTheme.elevatedCardDecoration(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              if (icon != null)
-                Icon(icon, size: 18, color: accent.withValues(alpha: 0.8)),
-              if (icon != null) const SizedBox(width: AppSpacing.sm),
+              if (icon != null) ...[
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Icon(icon, size: 16, color: accent),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+              ],
               Expanded(
-                child: Text(label, style: Theme.of(context).textTheme.bodySmall),
+                child: Text(label, style: CashierTheme.caption(context)),
               ),
             ],
           ),
@@ -53,7 +53,7 @@ class StatCard extends StatelessWidget {
           else
             Text(
               value,
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: accent),
+              style: CashierTheme.metricValue(context, large: true).copyWith(color: accent),
             ),
         ],
       ),

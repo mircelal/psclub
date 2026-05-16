@@ -101,7 +101,7 @@ class SessionCartList extends StatelessWidget {
                   child: Text(
                     '${lineTotal.toStringAsFixed(2)} ₼',
                     textAlign: TextAlign.end,
-                    style: TextStyle(fontWeight: FontWeight.w700, color: p.textPrimary, fontSize: compact ? 12 : 13),
+                    style: TextStyle(fontWeight: FontWeight.w600, color: p.textPrimary, fontSize: compact ? 12 : 13),
                   ),
                 ),
                 IconButton(
@@ -127,7 +127,7 @@ class SessionCartList extends StatelessWidget {
               const Spacer(),
               Text(
                 '${productsTotal.toStringAsFixed(2)} ₼',
-                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: accent),
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16, color: accent),
               ),
             ],
           ),
@@ -160,7 +160,7 @@ class _QtyControl extends StatelessWidget {
           Container(
             constraints: const BoxConstraints(minWidth: 28),
             alignment: Alignment.center,
-            child: Text('$qty', style: TextStyle(fontWeight: FontWeight.w700, color: p.textPrimary)),
+            child: Text('$qty', style: TextStyle(fontWeight: FontWeight.w600, color: p.textPrimary)),
           ),
           _QtyBtn(icon: Icons.add, onTap: onPlus),
         ],

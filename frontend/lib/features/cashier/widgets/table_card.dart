@@ -20,12 +20,14 @@ class TableCard extends ConsumerStatefulWidget {
     required this.table,
     required this.tick,
     required this.onTap,
+    this.onSecondaryTap,
     this.compact = false,
   });
 
   final Map<String, dynamic> table;
   final int tick;
   final VoidCallback onTap;
+  final void Function(TapDownDetails details)? onSecondaryTap;
   final bool compact;
 
   @override
@@ -107,6 +109,7 @@ class _TableCardState extends ConsumerState<TableCard> with SingleTickerProvider
       color: Colors.transparent,
       child: InkWell(
         onTap: widget.onTap,
+        onSecondaryTapDown: widget.onSecondaryTap,
         borderRadius: BorderRadius.circular(CashierTheme.radiusCard),
         child: AnimatedBuilder(
           animation: _blink,

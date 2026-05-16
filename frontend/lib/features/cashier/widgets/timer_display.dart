@@ -47,10 +47,10 @@ class TimerDisplay extends StatelessWidget {
         return Text(
           'Vaxt bitdi',
           style: TextStyle(
-            fontWeight: FontWeight.w800,
+            fontWeight: FontWeight.w600,
             fontSize: size + 1,
             color: AppColors.tableActive,
-            letterSpacing: 0.3,
+            letterSpacing: 0,
             fontFeatures: const [FontFeature.tabularFigures()],
           ),
         );
@@ -104,7 +104,7 @@ class _AnimatedClock extends StatelessWidget {
       color: color ?? defaultColor,
       fontFeatures: const [FontFeature.tabularFigures()],
       height: 1.0,
-      letterSpacing: fontSize > 20 ? -1.2 : -0.4,
+      letterSpacing: fontSize > 20 ? -0.5 : 0,
     );
 
     return Row(
@@ -159,7 +159,7 @@ class _Colon extends StatelessWidget {
   Widget build(BuildContext context) {
     return Opacity(
       opacity: opacity,
-      child: Text(':', style: TextStyle(fontWeight: FontWeight.w700, fontSize: size, height: 1.1)),
+      child: Text(':', style: TextStyle(fontWeight: FontWeight.w600, fontSize: size, height: 1.1)),
     );
   }
 }

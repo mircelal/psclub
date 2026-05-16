@@ -9,6 +9,7 @@ import 'cashier_stats_row.dart';
 class CashierSideRail extends StatelessWidget {
   const CashierSideRail({
     super.key,
+    this.inDrawer = false,
     required this.biz,
     required this.userName,
     required this.active,
@@ -20,6 +21,7 @@ class CashierSideRail extends StatelessWidget {
     required this.onRefresh,
     required this.onCounterSale,
     required this.onSettings,
+    required this.onShowShortcuts,
     required this.onLogout,
     this.onAdmin,
   });
@@ -35,13 +37,17 @@ class CashierSideRail extends StatelessWidget {
   final VoidCallback onRefresh;
   final VoidCallback onCounterSale;
   final VoidCallback onSettings;
+  final VoidCallback onShowShortcuts;
   final VoidCallback onLogout;
   final VoidCallback? onAdmin;
+
+  /// Drawer içində — eni parent-ə uyğun.
+  final bool inDrawer;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: CashierTheme.sideRailWidth,
+      width: inDrawer ? null : CashierTheme.sideRailWidth,
       decoration: CashierTheme.sideRailDecoration(context),
       child: SafeArea(
         right: false,
@@ -108,7 +114,7 @@ class CashierSideRail extends StatelessWidget {
                           icon: const Icon(Icons.shopping_bag_outlined, size: 20),
                           label: const Text('Birbaşa satış'),
                           style: FilledButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            padding: const EdgeInsets.fromLTRB(16, 10, 12, 10),
                             alignment: Alignment.centerLeft,
                           ),
                         ),
@@ -133,6 +139,7 @@ class CashierSideRail extends StatelessWidget {
               padding: const EdgeInsets.all(AppSpacing.md),
               child: _RailActions(
                 onRefresh: onRefresh,
+                onShowShortcuts: onShowShortcuts,
                 onSettings: onSettings,
                 onAdmin: onAdmin,
                 onLogout: onLogout,
@@ -193,12 +200,14 @@ class _UserTile extends StatelessWidget {
 class _RailActions extends StatelessWidget {
   const _RailActions({
     required this.onRefresh,
+    required this.onShowShortcuts,
     required this.onSettings,
     required this.onLogout,
     this.onAdmin,
   });
 
   final VoidCallback onRefresh;
+  final VoidCallback onShowShortcuts;
   final VoidCallback onSettings;
   final VoidCallback onLogout;
   final VoidCallback? onAdmin;
@@ -207,8 +216,9 @@ class _RailActions extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        _ActionButton(icon: Icons.sync_rounded, tooltip: 'Yenilə', onTap: onRefresh),
-        _ActionButton(icon: Icons.settings_outlined, tooltip: 'Görünüş', onTap: onSettings),
+        _ActionButton(icon: Icons.sync_rounded, tooltip: 'Yenilə (F5)', onTap: onRefresh),
+        _ActionButton(icon: Icons.keyboard_outlined, tooltip: 'Qısayollar (F1)', onTap: onShowShortcuts),
+        _ActionButton(icon: Icons.settings_outlined, tooltip: 'Görünüş (F9)', onTap: onSettings),
         if (onAdmin != null) _ActionButton(icon: Icons.admin_panel_settings_outlined, tooltip: 'Admin', onTap: onAdmin!),
         const Spacer(),
         _ActionButton(icon: Icons.logout_rounded, tooltip: 'Çıxış', onTap: onLogout, danger: true),

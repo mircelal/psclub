@@ -1,13 +1,32 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../core/theme/app_colors.dart';
+import '../../core/theme/brand_colors.dart';
+import '../../core/theme/cashier_theme.dart';
 import '../../core/theme/app_spacing.dart';
+import '../../core/utils/json_parse.dart';
 import '../../core/utils/phone_utils.dart';
 import '../../core/widgets/app_dialog.dart';
+import '../../core/widgets/phone_text_field.dart';
 import '../../core/widgets/app_snackbar.dart';
 import '../../core/widgets/empty_state.dart';
+import '../../core/widgets/money_text.dart';
 import '../../services/pos_service.dart';
+import 'customer_profile_screen.dart';
 import 'widgets/admin_page_layout.dart';
+
+enum CustomerListFilter {
+  all('all', 'Hamısı'),
+  topSpending('top_spending', 'Ən çox xərcləyən'),
+  withSpending('with_spending', 'Ödənişi olan'),
+  withSessions('with_sessions', 'Sessiyası var'),
+  noSessions('no_sessions', 'Sessiyası yox'),
+  activeNow('active_now', 'İndi aktiv');
+
+  const CustomerListFilter(this.apiValue, this.label);
+
+  final String apiValue;
+  final String label;
+}
 
 class CustomersScreen extends ConsumerStatefulWidget {
   const CustomersScreen({super.key});
@@ -20,13 +39,14 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
   List<Map<String, dynamic>> _all = [];
   List<Map<String, dynamic>> _filtered = [];
   bool _loading = true;
+  CustomerListFilter _filter = CustomerListFilter.all;
   final _searchCtrl = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     _load();
-    _searchCtrl.addListener(_applyFilter);
+    _searchCtrl.addListener(_applyLocalSearch);
   }
 
   @override
@@ -38,9 +58,12 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final list = await ref.read(posServiceProvider).searchCustomers('');
+      final list = await ref.read(posServiceProvider).searchCustomers(
+            '',
+            filter: _filter.apiValue,
+          );
       _all = list.cast<Map<String, dynamic>>();
-      _applyFilter();
+      _applyLocalSearch();
     } catch (_) {
       _all = [];
       _filtered = [];
@@ -48,7 +71,7 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
     if (mounted) setState(() => _loading = false);
   }
 
-  void _applyFilter() {
+  void _applyLocalSearch() {
     final q = _searchCtrl.text.trim().toLowerCase();
     final digits = q.replaceAll(RegExp(r'\D'), '');
     if (q.isEmpty) {
@@ -56,7 +79,7 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
     } else {
       _filtered = _all.where((c) {
         final name = (c['name'] as String? ?? '').toLowerCase();
-        final phone = (c['phone'] as String? ?? '');
+        final phone = c['phone'] as String? ?? '';
         if (name.contains(q)) return true;
         if (phone.toLowerCase().contains(q)) return true;
         if (digits.isNotEmpty && phone.replaceAll(RegExp(r'\D'), '').contains(digits)) return true;
@@ -66,10 +89,16 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
     if (mounted) setState(() {});
   }
 
+  void _setFilter(CustomerListFilter f) {
+    if (_filter == f) return;
+    setState(() => _filter = f);
+    _load();
+  }
+
   Future<void> _showForm({Map<String, dynamic>? customer}) async {
     final isEdit = customer != null;
     final nameCtrl = TextEditingController(text: customer?['name'] as String? ?? '');
-    final phoneCtrl = TextEditingController(text: customer?['phone'] as String? ?? '+994');
+    final phoneCtrl = TextEditingController(text: PhoneUtils.fieldValue(stored: customer?['phone'] as String?));
     final emailCtrl = TextEditingController(text: customer?['email'] as String? ?? '');
     final notesCtrl = TextEditingController(text: customer?['notes'] as String? ?? '');
 
@@ -84,13 +113,7 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
         children: [
           AppTextField(controller: nameCtrl, label: 'Ad soyad', prefixIcon: Icons.badge_outlined),
           const SizedBox(height: AppSpacing.lg),
-          AppTextField(
-            controller: phoneCtrl,
-            label: 'Telefon',
-            hint: PhoneUtils.displayHint(),
-            prefixIcon: Icons.phone_outlined,
-            keyboardType: TextInputType.phone,
-          ),
+          PhoneTextField(controller: phoneCtrl),
           const SizedBox(height: AppSpacing.lg),
           AppTextField(controller: emailCtrl, label: 'E-poçt (istəyə bağlı)', prefixIcon: Icons.email_outlined),
           const SizedBox(height: AppSpacing.lg),
@@ -111,34 +134,43 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
       return;
     }
 
+    final name = nameCtrl.text.trim();
+    final email = emailCtrl.text.trim();
+    final notes = notesCtrl.text.trim();
     final phone = PhoneUtils.normalize(phoneCtrl.text);
-    if (nameCtrl.text.trim().isEmpty || phone == null) {
-      if (mounted) showAppSnackBar(context, 'Ad və düzgün telefon daxil edin', isError: true);
-      nameCtrl.dispose();
-      phoneCtrl.dispose();
-      emailCtrl.dispose();
-      notesCtrl.dispose();
-      return;
-    }
-
-    final payload = {
-      'name': nameCtrl.text.trim(),
-      'phone': phone,
-      if (emailCtrl.text.trim().isNotEmpty) 'email': emailCtrl.text.trim(),
-      if (notesCtrl.text.trim().isNotEmpty) 'notes': notesCtrl.text.trim(),
-    };
 
     nameCtrl.dispose();
     phoneCtrl.dispose();
     emailCtrl.dispose();
     notesCtrl.dispose();
 
+    if (name.isEmpty || phone == null) {
+      if (mounted) {
+        showAppSnackBar(
+          context,
+          phone == null ? 'Düzgün telefon daxil edin' : 'Ad daxil edin',
+          isError: true,
+        );
+      }
+      return;
+    }
+
     try {
       final service = ref.read(posServiceProvider);
       if (isEdit) {
-        await service.updateCustomer(customer['id'] as int, payload);
+        await service.updateCustomer(customer['id'] as int, {
+          'name': name,
+          'phone': phone,
+          if (email.isNotEmpty) 'email': email,
+          if (notes.isNotEmpty) 'notes': notes,
+        });
       } else {
-        await service.createCustomer(payload);
+        await service.createCustomer({
+          'name': name,
+          'phone': phone,
+          if (email.isNotEmpty) 'email': email,
+          if (notes.isNotEmpty) 'notes': notes,
+        });
       }
       await _load();
       if (mounted) showAppSnackBar(context, isEdit ? 'Müştəri yeniləndi' : 'Müştəri yaradıldı');
@@ -161,40 +193,121 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
       child: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(AppSpacing.xxl, AppSpacing.lg, AppSpacing.xxl, 0),
-            child: TextField(
-              controller: _searchCtrl,
-              decoration: const InputDecoration(
-                hintText: 'Ad və ya telefon ilə axtar...',
-                prefixIcon: Icon(Icons.search, size: 20),
-              ),
+            padding: const EdgeInsets.fromLTRB(AppSpacing.xxl, AppSpacing.lg, AppSpacing.xxl, AppSpacing.sm),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final stacked = constraints.maxWidth < 720;
+                final searchField = TextField(
+                  controller: _searchCtrl,
+                  decoration: const InputDecoration(
+                    hintText: 'Ad və ya telefon ilə axtar...',
+                    prefixIcon: Icon(Icons.search, size: 20),
+                    isDense: true,
+                  ),
+                );
+                final filterControl = _CustomerFilterChips(
+                  selected: _filter,
+                  onChanged: _setFilter,
+                );
+
+                if (stacked) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      searchField,
+                      const SizedBox(height: AppSpacing.sm),
+                      filterControl,
+                    ],
+                  );
+                }
+
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(flex: 2, child: searchField),
+                    const SizedBox(width: AppSpacing.md),
+                    Expanded(flex: 3, child: filterControl),
+                  ],
+                );
+              },
             ),
           ),
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
                 : _filtered.isEmpty
-                    ? const EmptyState(
+                    ? EmptyState(
                         icon: Icons.people_outline,
-                        title: 'Müştəri yoxdur',
-                        subtitle: 'İlk müştərini əlavə edin',
+                        title: 'Müştəri tapılmadı',
+                        subtitle: _searchCtrl.text.isNotEmpty
+                            ? 'Axtarış və ya filtrə uyğun nəticə yoxdur'
+                            : 'İlk müştərini əlavə edin',
                       )
                     : ListView.builder(
                         padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxl, vertical: AppSpacing.lg),
                         itemCount: _filtered.length,
                         itemBuilder: (_, i) {
                           final c = _filtered[i];
+                          final totalSpent = jsonToDouble(c['total_spent']);
+                          final sessionCount = jsonToInt(c['session_count']);
+                          final openSessions = jsonToInt(c['open_session_count']);
+
                           return AdminListTile(
                             leading: CircleAvatar(
-                              backgroundColor: AppColors.primarySoft,
+                              backgroundColor: CashierTheme.accentSubtle(context),
                               child: Text(
-                                (c['name'] as String? ?? '?').isNotEmpty ? (c['name'] as String)[0].toUpperCase() : '?',
-                                style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.w700),
+                                (c['name'] as String? ?? '?').isNotEmpty
+                                    ? (c['name'] as String)[0].toUpperCase()
+                                    : '?',
+                                style: TextStyle(color: BrandColors.brightBlue, fontWeight: FontWeight.w600),
                               ),
                             ),
                             title: c['name'] as String? ?? '',
                             subtitle: c['phone'] as String? ?? '',
-                            onTap: () => _showForm(customer: c),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    MoneyText(
+                                      amount: totalSpent,
+                                      size: MoneySize.medium,
+                                      color: totalSpent > 0
+                                          ? BrandColors.brightBlue
+                                          : CashierTheme.textTertiary(context),
+                                      suffix: ' ₼',
+                                    ),
+                                    if (sessionCount > 0 || openSessions > 0) ...[
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        openSessions > 0
+                                            ? '$sessionCount sessiya · $openSessions aktiv'
+                                            : '$sessionCount sessiya',
+                                        style: CashierTheme.caption(context),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                                const SizedBox(width: 4),
+                                IconButton(
+                                  icon: const Icon(Icons.edit_outlined, size: 20),
+                                  tooltip: 'Redaktə et',
+                                  onPressed: () => _showForm(customer: c),
+                                ),
+                              ],
+                            ),
+                            onTap: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => CustomerProfileScreen(
+                                    customerId: c['id'] as int,
+                                    onUpdated: _load,
+                                  ),
+                                ),
+                              );
+                            },
                             onDelete: () async {
                               await ref.read(posServiceProvider).deleteCustomer(c['id'] as int);
                               await _load();
@@ -204,6 +317,50 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
                         },
                       ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CustomerFilterChips extends StatelessWidget {
+  const _CustomerFilterChips({
+    required this.selected,
+    required this.onChanged,
+  });
+
+  final CustomerListFilter selected;
+  final ValueChanged<CustomerListFilter> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          for (final f in CustomerListFilter.values) ...[
+            if (f != CustomerListFilter.values.first) const SizedBox(width: 6),
+            FilterChip(
+              label: Text(f.label),
+              selected: selected == f,
+              onSelected: (_) => onChanged(f),
+              showCheckmark: false,
+              labelStyle: TextStyle(
+                fontSize: 12,
+                fontWeight: selected == f ? FontWeight.w600 : FontWeight.w500,
+                color: selected == f ? BrandColors.brightBlue : CashierTheme.textSecondary(context),
+              ),
+              side: BorderSide(
+                color: selected == f
+                    ? BrandColors.brightBlue.withValues(alpha: 0.5)
+                    : CashierTheme.border(context),
+              ),
+              selectedColor: BrandColors.brightBlue.withValues(alpha: 0.12),
+              backgroundColor: CashierTheme.surfaceSecondary(context),
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              visualDensity: VisualDensity.compact,
+            ),
+          ],
         ],
       ),
     );

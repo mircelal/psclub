@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -6,27 +7,28 @@ import '../../core/auth/auth_state.dart';
 import '../../core/config/business_config_provider.dart';
 import '../../core/settings/app_settings.dart';
 import '../../core/settings/ui_settings_sheet.dart';
-import '../../core/theme/app_spacing.dart';
+import '../../core/theme/cashier_breakpoints.dart';
 import '../../core/theme/cashier_theme.dart';
+import '../../core/theme/cashier_theme_data.dart';
 import '../../core/utils/json_parse.dart';
 import '../../core/widgets/app_snackbar.dart';
 import '../../core/widgets/empty_state.dart';
 import '../../services/pos_service.dart';
 import 'show_session_panel.dart';
 import 'widgets/cashier_filter_bar.dart';
+import 'widgets/cashier_stats_row.dart';
 import 'widgets/cashier_side_rail.dart';
 import 'widgets/cashier_top_bar.dart';
-import 'widgets/counter_sales_bar.dart';
+import 'widgets/counter_sales_bar.dart' show CounterSaleToolbar;
 import 'widgets/open_counter_sale_dialog.dart';
 import 'widgets/open_table_dialog.dart';
+import 'widgets/table_context_menu.dart';
+import 'widgets/table_session_state.dart';
+import 'cashier_shortcuts.dart';
 import 'widgets/tables_layout.dart';
 
 final tablesProvider = FutureProvider.autoDispose<List<dynamic>>((ref) async {
   return ref.read(posServiceProvider).getTables();
-});
-
-final activeSessionsProvider = FutureProvider.autoDispose<List<dynamic>>((ref) async {
-  return ref.read(posServiceProvider).getActiveSessions();
 });
 
 class CashierHome extends ConsumerStatefulWidget {
@@ -37,6 +39,7 @@ class CashierHome extends ConsumerStatefulWidget {
 }
 
 class _CashierHomeState extends ConsumerState<CashierHome> {
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
   Timer? _pollTimer;
   Timer? _tickTimer;
   int _tick = 0;
@@ -50,7 +53,6 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
     });
     _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) {
       ref.invalidate(tablesProvider);
-      ref.invalidate(activeSessionsProvider);
     });
     _tickTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _tick++);
@@ -86,7 +88,6 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
 
   void _onSessionChanged() {
     ref.invalidate(tablesProvider);
-    ref.invalidate(activeSessionsProvider);
   }
 
   void _showSession(int sessionId) {
@@ -118,6 +119,28 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
     };
   }
 
+  List<Map<String, dynamic>> _filteredTables() {
+    final list = ref.read(tablesProvider).valueOrNull?.cast<Map<String, dynamic>>() ?? [];
+    return _applyFilter(list);
+  }
+
+  void _activateTableSlot(int slot) {
+    final tables = _filteredTables();
+    final index = slot - 1;
+    if (index < 0 || index >= tables.length) return;
+    final t = tables[index];
+    final sessionId = TableSessionState.openSessionId(t);
+    if (sessionId != null) {
+      _showSession(sessionId);
+    } else if (TableSessionState.canOpenSession(t)) {
+      _openTable(t);
+    }
+  }
+
+  void _refresh() {
+    ref.invalidate(tablesProvider);
+  }
+
   double _liveRevenue(List<Map<String, dynamic>> list) {
     var sum = 0.0;
     for (final t in list) {
@@ -134,11 +157,6 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
   Widget build(BuildContext context) {
     final user = ref.watch(authProvider).valueOrNull;
     final tablesAsync = ref.watch(tablesProvider);
-    final activeSessionsAsync = ref.watch(activeSessionsProvider);
-    final counterSessions = (activeSessionsAsync.valueOrNull ?? [])
-        .cast<Map<String, dynamic>>()
-        .where((s) => (s['session_type'] ?? 'table') == 'counter')
-        .toList();
     final uiSettings = ref.watch(appSettingsProvider).valueOrNull;
     final viewMode = uiSettings?.tableViewMode ?? TableViewMode.grid;
     final biz = ref.watch(businessConfigProvider).valueOrNull ?? BusinessConfig.fallback;
@@ -148,101 +166,180 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
     final empty = list.where((t) => t['status'] == 'empty').length;
     final revenue = _liveRevenue(list);
 
-    return Scaffold(
-      backgroundColor: CashierTheme.scaffoldBg(context),
-      body: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          CashierSideRail(
-            biz: biz,
-            userName: user?.fullName ?? user?.username ?? '',
-            active: active,
-            empty: empty,
-            total: list.length,
-            liveRevenue: revenue,
-            filter: _filter,
-            onFilterChanged: (f) => setState(() => _filter = f),
-            onCounterSale: _startCounterSale,
-            onRefresh: () {
-              ref.invalidate(tablesProvider);
-              ref.invalidate(activeSessionsProvider);
-            },
-            onSettings: () => showUiSettingsSheet(context),
-            onAdmin: user?.isAdmin == true ? () => context.go('/admin') : null,
-            onLogout: () => ref.read(authProvider.notifier).logout(),
-          ),
-          Expanded(
-            child: ColoredBox(
-              color: CashierTheme.surfaceMain(context),
-              child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                CashierTopBar(
-                  biz: biz,
+    final isAdmin = user?.isAdmin == true;
+
+    Widget buildSideRail({required bool inDrawer}) {
+      return CashierSideRail(
+        inDrawer: inDrawer,
+        biz: biz,
+        userName: user?.fullName ?? user?.username ?? '',
+        active: active,
+        empty: empty,
+        total: list.length,
+        liveRevenue: revenue,
+        filter: _filter,
+        onFilterChanged: (f) {
+          setState(() => _filter = f);
+          if (inDrawer) _scaffoldKey.currentState?.closeDrawer();
+        },
+        onCounterSale: () {
+          _startCounterSale();
+          if (inDrawer) _scaffoldKey.currentState?.closeDrawer();
+        },
+        onRefresh: _refresh,
+        onSettings: () {
+          showUiSettingsSheet(context);
+          if (inDrawer) _scaffoldKey.currentState?.closeDrawer();
+        },
+        onShowShortcuts: () {
+          showCashierShortcutsDialog(context, showAdmin: isAdmin);
+          if (inDrawer) _scaffoldKey.currentState?.closeDrawer();
+        },
+        onAdmin: isAdmin
+            ? () {
+                context.go('/admin');
+                if (inDrawer) _scaffoldKey.currentState?.closeDrawer();
+              }
+            : null,
+        onLogout: () => ref.read(authProvider.notifier).logout(),
+      );
+    }
+
+    Widget buildMainColumn(CashierBreakpoints bp) {
+      final padH = bp.contentPaddingH;
+      final padT = bp.contentPaddingV;
+
+      return ColoredBox(
+        color: CashierTheme.surfaceMain(context),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            CashierTopBar(
+              biz: biz,
+              liveRevenue: revenue,
+              activeCount: active,
+              totalCount: list.length,
+              onCounterSale: _startCounterSale,
+              onShowShortcuts: () => showCashierShortcutsDialog(context, showAdmin: isAdmin),
+              onMenuTap: bp.showDrawer ? () => _scaffoldKey.currentState?.openDrawer() : null,
+              layout: bp.topBarLayout,
+            ),
+            if (bp.showDrawer) ...[
+              Padding(
+                padding: EdgeInsets.fromLTRB(padH, 8, padH, 0),
+                child: CashierStatsRow(
+                  active: active,
+                  empty: empty,
+                  total: list.length,
                   liveRevenue: revenue,
-                  activeCount: active,
-                  totalCount: list.length,
-                  onCounterSale: _startCounterSale,
                 ),
-                CounterSalesBar(
-                  sessions: counterSessions,
-                  onNewSale: _startCounterSale,
-                  onOpenSession: _showSession,
-                ),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.lg),
-                    child: DecoratedBox(
-                      decoration: CashierTheme.contentPanelDecoration(context),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(CashierTheme.radiusCard + 2),
-                        child: tablesAsync.when(
-                          loading: () => Center(
-                            child: SizedBox(
-                              width: 28,
-                              height: 28,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2.5,
-                                color: CashierTheme.accent(context),
-                              ),
-                            ),
+              ),
+              CashierFilterBar(
+                filter: _filter,
+                onChanged: (f) => setState(() => _filter = f),
+                unitLabel: biz.labels.unitPlural,
+                horizontalScroll: bp.isMobile,
+              ),
+            ],
+            if (bp.isDesktop) CounterSaleToolbar(onNewSale: _startCounterSale),
+            Expanded(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(padH, padT, padH, padH),
+                child: DecoratedBox(
+                  decoration: CashierTheme.contentPanelDecoration(context),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(CashierTheme.radiusCard + 2),
+                    child: tablesAsync.when(
+                      loading: () => Center(
+                        child: SizedBox(
+                          width: 28,
+                          height: 28,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.5,
+                            color: CashierTheme.accent(context),
                           ),
-                          error: (e, _) => EmptyState(
-                            icon: Icons.cloud_off_outlined,
-                            title: 'Serverə qoşulmaq olmur',
-                            subtitle: e.toString(),
-                            action: FilledButton.icon(
-                              onPressed: () => ref.invalidate(tablesProvider),
-                              icon: const Icon(Icons.refresh),
-                              label: const Text('Yenidən cəhd et'),
-                            ),
-                          ),
-                          data: (tables) {
-                            final all = tables.cast<Map<String, dynamic>>();
-                            final filtered = _applyFilter(all);
-
-                            if (filtered.isEmpty) {
-                              return _EmptyFilterState(filter: _filter);
-                            }
-
-                            return TablesLayout(
-                              tables: filtered,
-                              viewMode: viewMode,
-                              tick: _tick,
-                              onOpen: _openTable,
-                              onSession: _showSession,
-                            );
-                          },
                         ),
                       ),
+                      error: (e, _) => EmptyState(
+                        icon: Icons.cloud_off_outlined,
+                        title: 'Serverə qoşulmaq olmur',
+                        subtitle: e.toString(),
+                        action: FilledButton.icon(
+                          onPressed: () => ref.invalidate(tablesProvider),
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Yenidən cəhd et'),
+                        ),
+                      ),
+                      data: (tables) {
+                        final all = tables.cast<Map<String, dynamic>>();
+                        final filtered = _applyFilter(all);
+
+                        if (filtered.isEmpty) {
+                          return _EmptyFilterState(filter: _filter);
+                        }
+
+                        return TablesLayout(
+                          tables: filtered,
+                          viewMode: viewMode,
+                          tick: _tick,
+                          onOpen: _openTable,
+                          onSession: _showSession,
+                          onTableContextMenu: (table, details) => showTableContextMenu(
+                            context: context,
+                            ref: ref,
+                            table: table,
+                            globalPosition: details.globalPosition,
+                            onOpenTable: _openTable,
+                            onOpenSession: _showSession,
+                            onChanged: _onSessionChanged,
+                          ),
+                        );
+                      },
                     ),
                   ),
                 ),
-              ],
+              ),
             ),
-            ),
-          ),
-        ],
+          ],
+        ),
+      );
+    }
+
+    return CashierShortcutsScope(
+      adminEnabled: isAdmin,
+      onHelp: () => showCashierShortcutsDialog(context, showAdmin: isAdmin),
+      onCounterSale: _startCounterSale,
+      onRefresh: _refresh,
+      onSettings: () => showUiSettingsSheet(context),
+      onFilter: (f) => setState(() => _filter = f),
+      onTableSlot: _activateTableSlot,
+      onAdmin: isAdmin ? () => context.go('/admin') : null,
+      child: CashierThemeData.wrap(
+        context,
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final bp = CashierBreakpoints.fromWidth(constraints.maxWidth);
+            final drawerWidth = math.min(constraints.maxWidth * 0.88, 320.0);
+
+            return Scaffold(
+              key: _scaffoldKey,
+              backgroundColor: CashierTheme.scaffoldBg(context),
+              drawer: bp.showDrawer
+                  ? Drawer(
+                      width: drawerWidth,
+                      child: buildSideRail(inDrawer: true),
+                    )
+                  : null,
+              body: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (bp.showPermanentRail) buildSideRail(inDrawer: false),
+                  Expanded(child: buildMainColumn(bp)),
+                ],
+              ),
+            );
+          },
+        ),
       ),
     );
   }

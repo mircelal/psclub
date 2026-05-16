@@ -20,20 +20,59 @@ final class CustomersController
     public function index(Request $request, Response $response): Response
     {
         $q = trim((string) ($request->getQueryParams()['q'] ?? ''));
+        $filter = (string) ($request->getQueryParams()['filter'] ?? 'all');
+        $allowedFilters = ['all', 'with_spending', 'with_sessions', 'no_sessions', 'active_now', 'top_spending'];
+        if (!in_array($filter, $allowedFilters, true)) {
+            $filter = 'all';
+        }
+
+        $sql = 'SELECT c.*,
+                COALESCE(SUM(CASE WHEN s.status = \'closed\' THEN s.total_amount ELSE 0 END), 0) AS total_spent,
+                COALESCE(SUM(CASE WHEN s.status = \'closed\' THEN 1 ELSE 0 END), 0) AS closed_session_count,
+                COUNT(s.id) AS session_count,
+                COALESCE(SUM(CASE WHEN s.status IN (\'active\', \'paused\') THEN 1 ELSE 0 END), 0) AS open_session_count
+            FROM customers c
+            LEFT JOIN sessions s ON s.customer_id = c.id
+            WHERE c.is_active = 1';
+
+        $params = [];
         if ($q !== '') {
             $like = '%' . $q . '%';
             $digits = preg_replace('/\D+/', '', $q) ?? '';
             $phoneLike = $digits !== '' ? '%' . $digits . '%' : $like;
-            $stmt = $this->pdo->prepare(
-                'SELECT * FROM customers WHERE is_active = 1 AND (name LIKE ? OR phone LIKE ? OR phone LIKE ? OR email LIKE ?)
-                 ORDER BY name LIMIT 100'
-            );
-            $stmt->execute([$like, $like, $phoneLike, $like]);
-        } else {
-            $stmt = $this->pdo->query('SELECT * FROM customers WHERE is_active = 1 ORDER BY name LIMIT 500');
+            $sql .= ' AND (c.name LIKE ? OR c.phone LIKE ? OR c.phone LIKE ? OR c.email LIKE ?)';
+            $params = [$like, $like, $phoneLike, $like];
         }
 
-        return ApiResponse::success($stmt->fetchAll());
+        $sql .= ' GROUP BY c.id';
+
+        $sql .= match ($filter) {
+            'with_spending' => ' HAVING total_spent > 0',
+            'with_sessions' => ' HAVING session_count > 0',
+            'no_sessions' => ' HAVING session_count = 0',
+            'active_now' => ' HAVING open_session_count > 0',
+            default => '',
+        };
+
+        $sql .= match ($filter) {
+            'top_spending' => ' ORDER BY total_spent DESC, c.name ASC',
+            default => ' ORDER BY c.name ASC',
+        };
+
+        $sql .= ' LIMIT 500';
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll();
+        foreach ($rows as &$row) {
+            $row['total_spent'] = (float) ($row['total_spent'] ?? 0);
+            $row['session_count'] = (int) ($row['session_count'] ?? 0);
+            $row['closed_session_count'] = (int) ($row['closed_session_count'] ?? 0);
+            $row['open_session_count'] = (int) ($row['open_session_count'] ?? 0);
+        }
+        unset($row);
+
+        return ApiResponse::success($rows);
     }
 
     public function store(Request $request, Response $response): Response
@@ -108,6 +147,59 @@ final class CustomersController
         $stmt->execute([$id]);
 
         return ApiResponse::success($stmt->fetch() ?: ['updated' => true]);
+    }
+
+    public function show(Request $request, Response $response, array $args): Response
+    {
+        $id = (int) $args['id'];
+        $stmt = $this->pdo->prepare('SELECT * FROM customers WHERE id = ? AND is_active = 1');
+        $stmt->execute([$id]);
+        $customer = $stmt->fetch();
+        if (!$customer) {
+            return ApiResponse::error('Müştəri tapılmadı', 404);
+        }
+
+        $statsStmt = $this->pdo->prepare(
+            'SELECT
+                COUNT(*) AS session_count,
+                SUM(CASE WHEN status = \'closed\' THEN 1 ELSE 0 END) AS closed_session_count,
+                SUM(CASE WHEN status IN (\'active\', \'paused\') THEN 1 ELSE 0 END) AS open_session_count,
+                COALESCE(SUM(CASE WHEN status = \'closed\' THEN total_amount ELSE 0 END), 0) AS total_spent,
+                COALESCE(SUM(CASE WHEN status = \'closed\' THEN products_total ELSE 0 END), 0) AS products_spent,
+                COALESCE(SUM(CASE WHEN status = \'closed\' THEN time_charge ELSE 0 END), 0) AS time_spent,
+                COALESCE(SUM(CASE WHEN status = \'closed\' THEN active_seconds ELSE 0 END), 0) AS play_seconds
+             FROM sessions
+             WHERE customer_id = ?'
+        );
+        $statsStmt->execute([$id]);
+        $stats = $statsStmt->fetch() ?: [];
+
+        $sessionsStmt = $this->pdo->prepare(
+            'SELECT s.id, s.session_type, s.status, s.opened_at, s.closed_at,
+                    s.time_charge, s.products_total, s.discount, s.total_amount, s.active_seconds,
+                    s.set_name_snapshot, s.planned_minutes,
+                    t.name AS table_name
+             FROM sessions s
+             LEFT JOIN tables t ON t.id = s.table_id
+             WHERE s.customer_id = ?
+             ORDER BY s.opened_at DESC
+             LIMIT 200'
+        );
+        $sessionsStmt->execute([$id]);
+
+        return ApiResponse::success([
+            'customer' => $customer,
+            'stats' => [
+                'session_count' => (int) ($stats['session_count'] ?? 0),
+                'closed_session_count' => (int) ($stats['closed_session_count'] ?? 0),
+                'open_session_count' => (int) ($stats['open_session_count'] ?? 0),
+                'total_spent' => (float) ($stats['total_spent'] ?? 0),
+                'products_spent' => (float) ($stats['products_spent'] ?? 0),
+                'time_spent' => (float) ($stats['time_spent'] ?? 0),
+                'play_seconds' => (int) ($stats['play_seconds'] ?? 0),
+            ],
+            'sessions' => $sessionsStmt->fetchAll(),
+        ]);
     }
 
     public function destroy(Request $request, Response $response, array $args): Response

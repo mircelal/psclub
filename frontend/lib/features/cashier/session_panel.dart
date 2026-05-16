@@ -5,7 +5,6 @@ import '../../core/billing/session_live_bill.dart';
 import '../../core/config/business_config_provider.dart';
 import '../../core/feedback/app_feedback.dart';
 import '../../core/utils/json_parse.dart';
-import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_palette.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/widgets/app_snackbar.dart';
@@ -36,6 +35,8 @@ class SessionPanel extends ConsumerStatefulWidget {
 }
 
 class _SessionPanelState extends ConsumerState<SessionPanel> {
+  static const _actionButtonHeight = 48.0;
+
   Map<String, dynamic>? _session;
   String? _sessionError;
   bool _sessionLoading = true;
@@ -178,12 +179,11 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
   Widget build(BuildContext context) {
     final p = context.palette;
 
+    final Widget body;
     if (_sessionLoading) {
-      return _shell(p, child: const SizedBox(height: 280, child: Center(child: CircularProgressIndicator(strokeWidth: 2))));
-    }
-
-    if (_sessionError != null || _session == null) {
-      return _shell(
+      body = _shell(p, child: const SizedBox(height: 280, child: Center(child: CircularProgressIndicator(strokeWidth: 2))));
+    } else if (_sessionError != null || _session == null) {
+      body = _shell(
         p,
         child: Padding(
           padding: const EdgeInsets.all(AppSpacing.xxl),
@@ -199,15 +199,21 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
           ),
         ),
       );
+    } else if (widget.isWideLayout) {
+      body = _shell(p, child: _buildWideBody(p));
+    } else {
+      body = _shell(
+        p,
+        child: _buildNarrowBody(p, widget.scrollController ?? ScrollController()),
+      );
     }
 
-    if (widget.isWideLayout) {
-      return _shell(p, child: _buildWideBody(p));
-    }
-
-    return _shell(
-      p,
-      child: _buildNarrowBody(p, widget.scrollController ?? ScrollController()),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (!didPop) await _closePanel();
+      },
+      child: body,
     );
   }
 
@@ -306,7 +312,9 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
         ? (_session!['table_name'] as String? ?? 'Birbaşa satış')
         : (_session!['table_name'] as String? ?? 'Masa');
     final subtitle = _isCounter
-        ? (customerName != null && customerName.isNotEmpty ? customerName : 'Masa olmadan məhsul satışı')
+        ? (customerName != null && customerName.isNotEmpty
+            ? '$customerName · ödənişdən sonra bağlanır'
+            : 'Tez satış · ödənişdən sonra bağlanır')
         : 'Sessiya #${widget.sessionId}';
 
     return Padding(
@@ -333,7 +341,7 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
               child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
             ),
           StatusBadge(label: status == 'paused' ? 'PAUSE' : 'AKTİV', status: status),
-          IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close)),
+          IconButton(onPressed: _closePanel, icon: const Icon(Icons.close)),
         ],
       ),
     );
@@ -390,9 +398,7 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
     final live = _liveBill();
     final status = _session!['status'] as String;
     final config = ref.watch(businessConfigProvider).valueOrNull ?? BusinessConfig.fallback;
-    final payColor = Theme.of(context).brightness == Brightness.light
-        ? const Color(0xFF2D8A5E)
-        : AppColors.accent;
+    final payColor = Theme.of(context).colorScheme.primary;
     // _tick drives rebuild every second for live timer amounts
     final _ = _tick;
 
@@ -419,20 +425,24 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
                   onPressed: _actionLoading ? null : _togglePause,
                   icon: Icon(status == 'active' ? Icons.pause : Icons.play_arrow),
                   label: Text(status == 'active' ? 'Pause' : 'Davam'),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(0, _actionButtonHeight),
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                  ),
                 ),
               ),
               const SizedBox(width: AppSpacing.md),
             ],
             Expanded(
-              flex: _isCounter ? 1 : 2,
               child: FilledButton.icon(
-                onPressed: () => _closeSession(),
+                onPressed: _actionLoading ? null : _closeSession,
                 icon: const Icon(Icons.payment),
                 label: Text(_isCounter ? 'Ödənişi al' : 'Hesabı bağla'),
                 style: FilledButton.styleFrom(
                   backgroundColor: payColor,
                   foregroundColor: Colors.white,
-                  minimumSize: const Size(0, 52),
+                  minimumSize: const Size(0, _actionButtonHeight),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
                 ),
               ),
             ),
@@ -440,6 +450,26 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
         ),
       ],
     );
+  }
+
+  Future<void> _voidEmptyCounterIfNeeded() async {
+    if (!_isCounter || _items.isNotEmpty) return;
+    try {
+      await ref.read(posServiceProvider).closeSession(
+            widget.sessionId,
+            method: 'cash',
+            cashAmount: 0,
+            cardAmount: 0,
+          );
+      widget.onChanged();
+    } catch (_) {}
+  }
+
+  Future<void> _closePanel() async {
+    if (_isCounter && _items.isEmpty) {
+      await _voidEmptyCounterIfNeeded();
+    }
+    if (mounted) Navigator.pop(context);
   }
 
   Future<void> _closeSession() async {
@@ -454,6 +484,9 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
     );
     if (closed == true && context.mounted) {
       AppFeedback.success();
+      if (_isCounter) {
+        showAppSnackBar(context, 'Satış tamamlandı');
+      }
       Navigator.pop(context);
       widget.onChanged();
     }

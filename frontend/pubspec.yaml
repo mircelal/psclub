@@ -24,6 +24,7 @@ dependencies:
   launch_at_startup: ^0.5.1
   audioplayers: ^6.6.0
   path_provider: ^2.1.5
+  google_fonts: ^6.2.1
 
 dev_dependencies:
   flutter_test:

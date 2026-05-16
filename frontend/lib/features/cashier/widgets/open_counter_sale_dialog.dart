@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_spacing.dart';
+import '../../../core/theme/brand_colors.dart';
+import '../../../core/theme/cashier_theme_data.dart';
 import '../../../core/widgets/customer_picker.dart';
 import '../../../services/pos_service.dart';
 
@@ -14,7 +16,9 @@ class CounterSaleStartResult {
 Future<CounterSaleStartResult?> showOpenCounterSaleDialog(BuildContext context) {
   return showDialog<CounterSaleStartResult>(
     context: context,
-    builder: (ctx) => Dialog(
+    builder: (ctx) => CashierThemeData.wrap(
+      ctx,
+      Dialog(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 480),
         child: Padding(
@@ -25,7 +29,7 @@ Future<CounterSaleStartResult?> showOpenCounterSaleDialog(BuildContext context) 
             children: [
               Row(
                 children: [
-                  Icon(Icons.shopping_bag_outlined, color: Theme.of(ctx).colorScheme.primary),
+                  Icon(Icons.shopping_bag_outlined, color: BrandColors.brightBlue),
                   const SizedBox(width: AppSpacing.md),
                   Expanded(
                     child: Text('Birbaşa satış', style: Theme.of(ctx).textTheme.titleLarge),
@@ -47,6 +51,7 @@ Future<CounterSaleStartResult?> showOpenCounterSaleDialog(BuildContext context) 
           ),
         ),
       ),
+    ),
     ),
   );
 }

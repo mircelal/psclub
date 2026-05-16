@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/theme/cashier_theme_data.dart';
 import 'session_panel.dart';
 
 /// 13–24" ekranlar üçün geniş mərkəzlənmiş modal; kiçik ekranda tam en bottom sheet.
@@ -20,7 +21,9 @@ void showSessionPanel(BuildContext context, WidgetRef ref, int sessionId, VoidCa
         final maxW = math.min(size.width * 0.94, 1320.0);
         final maxH = math.min(size.height * 0.94, 900.0);
 
-        return Center(
+        return CashierThemeData.wrap(
+          ctx,
+          Center(
           child: Material(
             color: Colors.transparent,
             child: ConstrainedBox(
@@ -32,6 +35,7 @@ void showSessionPanel(BuildContext context, WidgetRef ref, int sessionId, VoidCa
               ),
             ),
           ),
+        ),
         );
       },
       transitionBuilder: (ctx, anim, _, child) => FadeTransition(
@@ -55,11 +59,14 @@ void showSessionPanel(BuildContext context, WidgetRef ref, int sessionId, VoidCa
       minChildSize: 0.7,
       maxChildSize: 0.98,
       expand: false,
-      builder: (ctx, scrollController) => SessionPanel(
-        sessionId: sessionId,
-        scrollController: scrollController,
-        onChanged: onChanged,
-        isWideLayout: false,
+      builder: (ctx, scrollController) => CashierThemeData.wrap(
+        ctx,
+        SessionPanel(
+          sessionId: sessionId,
+          scrollController: scrollController,
+          onChanged: onChanged,
+          isWideLayout: false,
+        ),
       ),
     ),
   );

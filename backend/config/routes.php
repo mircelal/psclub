@@ -96,6 +96,7 @@ return function (App $app): void {
             $admin->put('/coupons/{id}', [CouponsController::class, 'update']);
             $admin->delete('/coupons/{id}', [CouponsController::class, 'destroy']);
 
+            $admin->get('/customers/{id}', [CustomersController::class, 'show']);
             $admin->put('/customers/{id}', [CustomersController::class, 'update']);
             $admin->delete('/customers/{id}', [CustomersController::class, 'destroy']);
 

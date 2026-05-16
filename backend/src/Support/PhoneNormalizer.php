@@ -12,7 +12,11 @@ final class PhoneNormalizer
         if ($phone === null) {
             return null;
         }
-        $digits = preg_replace('/\D+/', '', trim($phone)) ?? '';
+        $trimmed = trim($phone);
+        if ($trimmed === '' || preg_match('/[a-zA-Z]/', $trimmed)) {
+            return null;
+        }
+        $digits = preg_replace('/\D+/', '', $trimmed) ?? '';
         if ($digits === '') {
             return null;
         }
@@ -25,7 +29,9 @@ final class PhoneNormalizer
             return null;
         }
 
-        return '+994' . $digits;
+        $normalized = '+994' . $digits;
+
+        return preg_match('/^\+994\d{9}$/', $normalized) === 1 ? $normalized : null;
     }
 
     public static function isValid(?string $phone): bool

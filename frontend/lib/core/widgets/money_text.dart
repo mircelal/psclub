@@ -18,10 +18,10 @@ class MoneyText extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (fontSize, weight) = switch (size) {
-      MoneySize.small => (14.0, FontWeight.w600),
-      MoneySize.medium => (18.0, FontWeight.w700),
-      MoneySize.large => (28.0, FontWeight.w800),
-      MoneySize.hero => (36.0, FontWeight.w800),
+      MoneySize.small => (14.0, FontWeight.w500),
+      MoneySize.medium => (18.0, FontWeight.w600),
+      MoneySize.large => (26.0, FontWeight.w600),
+      MoneySize.hero => (32.0, FontWeight.w600),
     };
 
     return RichText(
@@ -33,7 +33,7 @@ class MoneyText extends StatelessWidget {
               fontSize: fontSize,
               fontWeight: weight,
               color: color ?? Theme.of(context).colorScheme.onSurface,
-              letterSpacing: -0.5,
+              letterSpacing: 0,
             ),
           ),
           TextSpan(

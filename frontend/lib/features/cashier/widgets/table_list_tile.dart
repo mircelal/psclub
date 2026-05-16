@@ -18,11 +18,13 @@ class TableListTile extends ConsumerStatefulWidget {
     required this.table,
     required this.tick,
     required this.onTap,
+    this.onSecondaryTap,
   });
 
   final Map<String, dynamic> table;
   final int tick;
   final VoidCallback onTap;
+  final void Function(TapDownDetails details)? onSecondaryTap;
 
   @override
   ConsumerState<TableListTile> createState() => _TableListTileState();
@@ -99,6 +101,7 @@ class _TableListTileState extends ConsumerState<TableListTile> with SingleTicker
       color: Colors.transparent,
       child: InkWell(
         onTap: widget.onTap,
+        onSecondaryTapDown: widget.onSecondaryTap,
         borderRadius: BorderRadius.circular(CashierTheme.radiusCard),
         child: AnimatedBuilder(
           animation: _blink,

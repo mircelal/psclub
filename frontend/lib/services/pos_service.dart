@@ -103,13 +103,24 @@ class PosService {
     return res['data'] as Map<String, dynamic>;
   }
 
-  Future<List<dynamic>> searchCustomers(String query) async {
-    final res = await _api.get('/customers', query: query.isEmpty ? null : {'q': query});
+  Future<List<dynamic>> searchCustomers(
+    String query, {
+    String filter = 'all',
+  }) async {
+    final queryParams = <String, String>{};
+    if (query.isNotEmpty) queryParams['q'] = query;
+    if (filter != 'all') queryParams['filter'] = filter;
+    final res = await _api.get('/customers', query: queryParams.isEmpty ? null : queryParams);
     return res['data'] as List<dynamic>;
   }
 
   Future<Map<String, dynamic>> createCustomer(Map<String, dynamic> data) async {
     final res = await _api.post('/customers', data: data);
+    return res['data'] as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> getCustomerProfile(int id) async {
+    final res = await _api.get('/customers/$id');
     return res['data'] as Map<String, dynamic>;
   }
 
