@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Modules\Sessions;
 
 use App\Modules\Coupons\CouponsController;
+use App\Modules\SessionSets\SessionSetsController;
 use App\Modules\Stock\StockController;
 use App\Support\ApiResponse;
 use App\Support\BillingCalculator;
@@ -22,7 +23,8 @@ final class SessionsController
         private readonly BillingCalculator $billing,
         private readonly DatabaseClock $clock,
         private readonly StockController $stock,
-        private readonly ReceiptService $receipts
+        private readonly ReceiptService $receipts,
+        private readonly SessionSetsController $sessionSets
     ) {
     }
 
@@ -97,17 +99,55 @@ final class SessionsController
             return ApiResponse::error('Table already has active session', 409);
         }
 
+        $tariffId = isset($body['tariff_id']) ? (int) $body['tariff_id'] : null;
+        $resolved = $this->resolveTableTariff($tableId, $tariffId);
+        if ($resolved === false) {
+            return ApiResponse::error('Tariff is required', 422, ['code' => 'tariff_required']);
+        }
+
+        [$hourlyRate, $tariffIdFinal, $tariffName] = $resolved;
+
+        $setId = isset($body['set_id']) ? (int) $body['set_id'] : null;
+        $setRow = $setId > 0 ? $this->sessionSets->findSet($setId) : null;
+        if ($setId > 0 && $setRow === null) {
+            return ApiResponse::error('Set not found', 404);
+        }
+
+        $setName = null;
+        $setPrice = null;
+        $plannedMinutes = isset($body['planned_minutes']) && (int) $body['planned_minutes'] > 0
+            ? (int) $body['planned_minutes']
+            : null;
+
+        if ($setRow !== null) {
+            $setName = (string) $setRow['name'];
+            $setPrice = (float) $setRow['fixed_price'];
+            if (!empty($setRow['planned_minutes'])) {
+                $plannedMinutes = (int) $setRow['planned_minutes'];
+            }
+        }
+
         $this->pdo->beginTransaction();
         try {
-            $plannedMinutes = isset($body['planned_minutes']) && (int) $body['planned_minutes'] > 0
-                ? (int) $body['planned_minutes']
-                : null;
-
             $this->pdo->prepare(
-                'INSERT INTO sessions (business_id, table_id, session_type, customer_id, opened_by, status, opened_at, hourly_rate_snapshot, planned_minutes, created_at, updated_at)
-                 VALUES (1, ?, \'table\', ?, ?, \'active\', NOW(), ?, ?, NOW(), NOW())'
-            )->execute([$tableId, $customerId, (int) $user['id'], (float) $tableRow['hourly_rate'], $plannedMinutes]);
+                'INSERT INTO sessions (business_id, table_id, session_type, customer_id, opened_by, status, opened_at, hourly_rate_snapshot, tariff_id, tariff_name_snapshot, set_id, set_name_snapshot, set_price_snapshot, planned_minutes, created_at, updated_at)
+                 VALUES (1, ?, \'table\', ?, ?, \'active\', NOW(), ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())'
+            )->execute([
+                $tableId,
+                $customerId,
+                (int) $user['id'],
+                $hourlyRate,
+                $tariffIdFinal,
+                $tariffName,
+                $setId > 0 ? $setId : null,
+                $setName,
+                $setPrice,
+                $plannedMinutes,
+            ]);
             $sessionId = (int) $this->pdo->lastInsertId();
+            if ($setRow !== null) {
+                $this->applySessionSetItems($sessionId, $setRow, (int) $user['id']);
+            }
             $this->pdo->prepare("UPDATE tables SET status = 'active', updated_at = NOW() WHERE id = ?")->execute([$tableId]);
             $this->pdo->commit();
         } catch (\Throwable $e) {
@@ -244,8 +284,8 @@ final class SessionsController
                     ->execute([$newQty, (int) $row['id']]);
             } else {
                 $this->pdo->prepare(
-                    'INSERT INTO session_items (session_id, product_id, product_name, quantity, unit_price, created_at)
-                     VALUES (?, ?, ?, ?, ?, NOW())'
+                    'INSERT INTO session_items (session_id, product_id, product_name, quantity, unit_price, is_set_item, created_at)
+                     VALUES (?, ?, ?, ?, ?, 0, NOW())'
                 )->execute([$sessionId, $productId, $product['name'], $qty, (float) $product['price']]);
             }
             $this->pdo->commit();
@@ -584,15 +624,21 @@ final class SessionsController
         $isCounter = ($session['session_type'] ?? 'table') === 'counter';
         $biz = $this->pdo->query('SELECT billing_mode, billing_rounding, time_billing_enabled FROM businesses WHERE id = 1')->fetch();
         $timeBilling = !$isCounter && (!isset($biz['time_billing_enabled']) || (bool) $biz['time_billing_enabled']);
-        $timeCharge = $timeBilling
-            ? $this->billing->calculateTimeCharge(
-                $activeSeconds,
-                (float) $session['hourly_rate_snapshot'],
-                $biz['billing_mode'] ?? 'per_minute',
-                (float) ($biz['billing_rounding'] ?? 0.01)
-            )
-            : 0.0;
-        $productsTotal = $this->billing->calculateProductsTotal($items);
+        $setPrice = (float) ($session['set_price_snapshot'] ?? 0);
+        if ($setPrice > 0) {
+            $timeCharge = round($setPrice, 2);
+            $productsTotal = $this->billing->calculateProductsTotal($items, true);
+        } else {
+            $timeCharge = $timeBilling
+                ? $this->billing->calculateTimeCharge(
+                    $activeSeconds,
+                    (float) $session['hourly_rate_snapshot'],
+                    $biz['billing_mode'] ?? 'per_minute',
+                    (float) ($biz['billing_rounding'] ?? 0.01)
+                )
+                : 0.0;
+            $productsTotal = $this->billing->calculateProductsTotal($items);
+        }
         $subtotal = $timeCharge + $productsTotal;
         $discountType = $session['discount_type'] ?? 'none';
         $discountValue = (float) ($session['discount_value'] ?? 0);
@@ -622,5 +668,68 @@ final class SessionsController
             'remaining_seconds' => $remainingSeconds,
             'is_countdown' => $plannedMinutes > 0,
         ];
+    }
+
+    /**
+     * @return array{0: float, 1: ?int, 2: ?string}|false
+     */
+    private function resolveTableTariff(int $tableId, ?int $tariffId): array|false
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT id, name, hourly_rate FROM table_tariffs
+             WHERE table_id = ? AND is_active = 1
+             ORDER BY sort_order, id'
+        );
+        $stmt->execute([$tableId]);
+        $tariffs = $stmt->fetchAll();
+
+        if ($tariffs === []) {
+            $table = $this->pdo->prepare('SELECT hourly_rate FROM tables WHERE id = ?');
+            $table->execute([$tableId]);
+            $row = $table->fetch();
+            if (!$row) {
+                return false;
+            }
+
+            return [(float) $row['hourly_rate'], null, null];
+        }
+
+        if ($tariffId !== null && $tariffId > 0) {
+            foreach ($tariffs as $tariff) {
+                if ((int) $tariff['id'] === $tariffId) {
+                    return [(float) $tariff['hourly_rate'], $tariffId, (string) $tariff['name']];
+                }
+            }
+
+            return false;
+        }
+
+        if (count($tariffs) === 1) {
+            $tariff = $tariffs[0];
+
+            return [(float) $tariff['hourly_rate'], (int) $tariff['id'], (string) $tariff['name']];
+        }
+
+        return false;
+    }
+
+    private function applySessionSetItems(int $sessionId, array $set, int $userId): void
+    {
+        foreach ($set['items'] as $item) {
+            $productId = (int) $item['product_id'];
+            $qty = (int) $item['quantity'];
+            $pstmt = $this->pdo->prepare('SELECT name FROM products WHERE id = ?');
+            $pstmt->execute([$productId]);
+            $product = $pstmt->fetch();
+            if (!$product) {
+                continue;
+            }
+
+            $this->stock->applyStockChange($productId, 'sale', $qty, 'sale', 'session', $sessionId, $userId);
+            $this->pdo->prepare(
+                'INSERT INTO session_items (session_id, product_id, product_name, quantity, unit_price, is_set_item, created_at)
+                 VALUES (?, ?, ?, ?, 0, 1, NOW())'
+            )->execute([$sessionId, $productId, $product['name'], $qty]);
+        }
     }
 }

@@ -4,6 +4,7 @@ import '../../../core/config/business_config_provider.dart';
 import '../../../core/theme/cashier_theme.dart';
 import '../../../core/theme/table_status_theme.dart';
 import '../../../core/utils/json_parse.dart';
+import '../../../core/utils/table_tariff_utils.dart';
 import '../../../core/widgets/money_text.dart';
 import '../../../core/widgets/status_badge.dart';
 import 'table_live_state.dart';
@@ -105,7 +106,7 @@ class _TableListTileState extends ConsumerState<TableListTile> with SingleTicker
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(CashierTheme.radiusCard),
               color: cardStyle.cardFill,
-              border: CashierTheme.cardBorder(context),
+              border: Border.all(color: cardStyle.cardBorder, width: cardStyle.borderWidth),
               boxShadow: cardStyle.cardShadow ?? CashierTheme.cardShadow(context),
             ),
             child: child,
@@ -116,7 +117,7 @@ class _TableListTileState extends ConsumerState<TableListTile> with SingleTicker
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Container(width: 4, color: cardStyle.accent),
+                  Container(width: cardStyle.accentBarWidth, color: cardStyle.accent),
                   Expanded(
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -143,19 +144,23 @@ class _TableListTileState extends ConsumerState<TableListTile> with SingleTicker
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  '${jsonToDouble(widget.table['hourly_rate']).toStringAsFixed(2)} ₼/saat',
+                                  activeSessionTariffLabel(widget.table) ??
+                                      formatTableTariffSummary(widget.table),
                                   style: CashierTheme.caption(context),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                                 if (live != null && live.items.isNotEmpty) ...[
                                   const SizedBox(height: 6),
-                                  TableSessionItems(items: live.items, maxVisible: 5),
+                                  TableSessionItems(items: live.items, maxVisible: 3, compact: true),
                                 ],
                               ],
                             ),
                           ),
                           if (live != null) ...[
-                            const SizedBox(width: 16),
-                            Column(
+                            const SizedBox(width: 12),
+                            Flexible(
+                              child: Column(
                               crossAxisAlignment: CrossAxisAlignment.end,
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
@@ -177,17 +182,24 @@ class _TableListTileState extends ConsumerState<TableListTile> with SingleTicker
                                 ),
                               ],
                             ),
+                            ),
                           ] else ...[
                             const SizedBox(width: 12),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                              decoration: BoxDecoration(
-                                color: cardStyle.accent,
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: const Text(
-                                'Başlat',
-                                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13),
+                            SizedBox(
+                              height: 32,
+                              child: FilledButton(
+                                onPressed: null,
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: CashierTheme.accent(context),
+                                  disabledBackgroundColor: CashierTheme.accent(context),
+                                  disabledForegroundColor: Colors.white,
+                                  elevation: 0,
+                                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(CashierTheme.radiusControl + 2),
+                                  ),
+                                ),
+                                child: const Text('Sessiya aç', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
                               ),
                             ),
                           ],

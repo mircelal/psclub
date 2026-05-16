@@ -10,6 +10,10 @@ final productsProvider = FutureProvider<List<dynamic>>((ref) async {
   return ref.read(posServiceProvider).getProducts();
 });
 
+final sessionSetsProvider = FutureProvider.autoDispose<List<dynamic>>((ref) async {
+  return ref.read(posServiceProvider).getSessionSets();
+});
+
 class PosService {
   PosService(this._api);
   final ApiClient _api;
@@ -38,13 +42,35 @@ class PosService {
     int tableId, {
     int? plannedMinutes,
     int? customerId,
+    int? tariffId,
+    int? setId,
   }) async {
     final res = await _api.post('/sessions', data: {
       'table_id': tableId,
       if (plannedMinutes != null && plannedMinutes > 0) 'planned_minutes': plannedMinutes,
       if (customerId != null) 'customer_id': customerId,
+      if (tariffId != null) 'tariff_id': tariffId,
+      if (setId != null) 'set_id': setId,
     });
     return res['data'] as Map<String, dynamic>;
+  }
+
+  Future<List<dynamic>> getSessionSets() async {
+    final res = await _api.get('/session-sets');
+    return res['data'] as List<dynamic>;
+  }
+
+  Future<int> createSessionSet(Map<String, dynamic> data) async {
+    final res = await _api.post('/session-sets', data: data);
+    return jsonToInt((res['data'] as Map<String, dynamic>)['id']);
+  }
+
+  Future<void> updateSessionSet(int id, Map<String, dynamic> data) async {
+    await _api.put('/session-sets/$id', data: data);
+  }
+
+  Future<void> deleteSessionSet(int id) async {
+    await _api.delete('/session-sets/$id');
   }
 
   Future<Map<String, dynamic>> openCounterSale({int? customerId}) async {
@@ -165,8 +191,16 @@ class PosService {
   }
 
   // Admin
-  Future<void> createTable(String name, double rate) async {
-    await _api.post('/tables', data: {'name': name, 'hourly_rate': rate});
+  Future<void> createTable(
+    String name, {
+    required List<Map<String, dynamic>> tariffs,
+    int sortOrder = 0,
+  }) async {
+    await _api.post('/tables', data: {
+      'name': name,
+      'sort_order': sortOrder,
+      'tariffs': tariffs,
+    });
   }
 
   Future<void> updateTable(int id, Map<String, dynamic> data) async {

@@ -1,3 +1,5 @@
+import '../utils/json_parse.dart';
+
 class BillingPreview {
   BillingPreview({
     required this.activeSeconds,
@@ -73,12 +75,12 @@ class BillingCalculator {
     final bill = table['bill_preview'] as Map<String, dynamic>?;
     if (bill != null) {
       return BillingPreview(
-        activeSeconds: (bill['active_seconds'] as num?)?.toInt() ?? 0,
-        timeCharge: (bill['time_charge'] as num?)?.toDouble() ?? 0,
-        productsTotal: (bill['products_total'] as num?)?.toDouble() ?? 0,
-        totalAmount: (bill['total_amount'] as num?)?.toDouble() ?? 0,
-        plannedMinutes: (bill['planned_minutes'] as num?)?.toInt(),
-        remainingSeconds: (bill['remaining_seconds'] as num?)?.toInt(),
+        activeSeconds: jsonToInt(bill['active_seconds']),
+        timeCharge: jsonToDouble(bill['time_charge']),
+        productsTotal: jsonToDouble(bill['products_total']),
+        totalAmount: jsonToDouble(bill['total_amount']),
+        plannedMinutes: jsonToIntOrNull(bill['planned_minutes']),
+        remainingSeconds: jsonToIntOrNull(bill['remaining_seconds']),
       );
     }
 
@@ -90,7 +92,7 @@ class BillingCalculator {
       hourlyRate: rate,
       billingMode: billingMode,
     );
-    final planned = (table['planned_minutes'] as num?)?.toInt();
+    final planned = jsonToIntOrNull(table['planned_minutes']);
     final remaining = planned != null && planned > 0
         ? (planned * 60 - activeSeconds).clamp(0, planned * 60)
         : null;

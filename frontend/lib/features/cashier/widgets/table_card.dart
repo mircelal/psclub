@@ -6,6 +6,7 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/cashier_theme.dart';
 import '../../../core/theme/table_status_theme.dart';
 import '../../../core/utils/json_parse.dart';
+import '../../../core/utils/table_tariff_utils.dart';
 import '../../../core/widgets/money_text.dart';
 import '../../../core/widgets/status_badge.dart';
 import 'table_live_state.dart';
@@ -89,7 +90,9 @@ class _TableCardState extends ConsumerState<TableCard> with SingleTickerProvider
           )
         : null;
     final name = widget.table['name'] as String;
-    final rate = jsonToDouble(widget.table['hourly_rate']);
+    final rate = jsonToDouble(widget.table['session_hourly_rate'] ?? widget.table['hourly_rate']);
+    final tariffLabel = widget.table['session_set_name'] as String? ?? activeSessionTariffLabel(widget.table);
+    final rateSummary = formatTableTariffSummary(widget.table);
 
     final sessionId = widget.table['session_id'] as int?;
     final isExpired = live?.isExpired ?? false;
@@ -112,7 +115,7 @@ class _TableCardState extends ConsumerState<TableCard> with SingleTickerProvider
             decoration: BoxDecoration(
               color: cardStyle.cardFill,
               borderRadius: BorderRadius.circular(CashierTheme.radiusCard),
-              border: Border.all(color: cardStyle.cardBorder.withValues(alpha: 0.65), width: 0.5),
+              border: Border.all(color: cardStyle.cardBorder, width: cardStyle.borderWidth),
               boxShadow: cardStyle.cardShadow ?? CashierTheme.cardShadow(context),
             ),
             child: child,
@@ -122,7 +125,7 @@ class _TableCardState extends ConsumerState<TableCard> with SingleTickerProvider
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Container(height: 3, color: cardStyle.accent),
+                Container(height: cardStyle.accentBarWidth, color: cardStyle.accent),
                 Expanded(
                   child: Padding(
                     padding: EdgeInsets.all(widget.compact ? 12 : 14),
@@ -138,8 +141,16 @@ class _TableCardState extends ConsumerState<TableCard> with SingleTickerProvider
                             compact: widget.compact,
                             cardStyle: cardStyle,
                             timeBillingEnabled: config.timeBillingEnabled,
+                            tariffLabel: tariffLabel,
                           )
-                        : _EmptyBody(name: name, rate: rate, status: status, cardStyle: cardStyle, compact: widget.compact),
+                        : _EmptyBody(
+                            name: name,
+                            rate: rate,
+                            rateSummary: rateSummary,
+                            status: status,
+                            cardStyle: cardStyle,
+                            compact: widget.compact,
+                          ),
                   ),
                 ),
               ],
@@ -163,6 +174,7 @@ class _ActiveBody extends StatelessWidget {
     required this.compact,
     required this.cardStyle,
     required this.timeBillingEnabled,
+    this.tariffLabel,
   });
 
   final String name;
@@ -175,6 +187,7 @@ class _ActiveBody extends StatelessWidget {
   final bool compact;
   final TableStatusStyle cardStyle;
   final bool timeBillingEnabled;
+  final String? tariffLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -189,21 +202,24 @@ class _ActiveBody extends StatelessWidget {
             StatusBadge(label: _statusLabel(status), status: status, hasSession: hasSession),
           ],
         ),
-        const Spacer(),
+        const Spacer(flex: 1),
         Center(
-          child: TimerDisplay(
-            bill: bill,
-            isPaused: isPaused,
-            tick: tick,
-            compact: compact,
-            large: !compact,
-            isExpired: live.isExpired,
-            isUrgent: live.isUrgent,
-            color: cardStyle.accent,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: TimerDisplay(
+              bill: bill,
+              isPaused: isPaused,
+              tick: tick,
+              compact: compact,
+              large: !compact,
+              isExpired: live.isExpired,
+              isUrgent: live.isUrgent,
+              color: cardStyle.accent,
+            ),
           ),
         ),
-        const SizedBox(height: 8),
-        if ((timeBillingEnabled && bill.timeCharge > 0) || bill.productsTotal > 0)
+        if (!compact && ((timeBillingEnabled && bill.timeCharge > 0) || bill.productsTotal > 0)) ...[
+          const SizedBox(height: 6),
           Row(
             children: [
               if (timeBillingEnabled && bill.timeCharge > 0)
@@ -213,16 +229,18 @@ class _ActiveBody extends StatelessWidget {
                 Expanded(child: _BreakdownChip(label: 'Məhsul', amount: bill.productsTotal, color: const Color(0xFF5856D6))),
             ],
           ),
-        if (live.items.isNotEmpty) ...[
-          const SizedBox(height: 6),
-          TableSessionItems(items: live.items, compact: true, maxVisible: compact ? 2 : 3),
         ],
-        const Spacer(),
+        if (!compact && live.items.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          TableSessionItems(items: live.items, compact: true, maxVisible: 2),
+        ],
+        const Spacer(flex: 1),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
             color: cardStyle.timerZoneFill,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(CashierTheme.radiusControl),
+            border: Border.all(color: cardStyle.cardBorder.withValues(alpha: 0.85)),
           ),
           child: Row(
             children: [
@@ -237,8 +255,13 @@ class _ActiveBody extends StatelessWidget {
             ],
           ),
         ),
-        const SizedBox(height: 6),
-        Text('${rate.toStringAsFixed(2)} ₼/saat', style: CashierTheme.caption(context)),
+        if (tariffLabel != null && !compact) ...[
+          const SizedBox(height: 4),
+          Text(tariffLabel!, style: CashierTheme.caption(context), maxLines: 1, overflow: TextOverflow.ellipsis),
+        ] else if (!compact) ...[
+          const SizedBox(height: 4),
+          Text('${rate.toStringAsFixed(2)} ₼/saat', style: CashierTheme.caption(context), maxLines: 1, overflow: TextOverflow.ellipsis),
+        ],
       ],
     );
   }
@@ -257,14 +280,18 @@ class _EmptyBody extends StatelessWidget {
     required this.rate,
     required this.status,
     required this.cardStyle,
+    required this.rateSummary,
     required this.compact,
   });
 
   final String name;
   final double rate;
+  final String rateSummary;
   final String status;
   final TableStatusStyle cardStyle;
   final bool compact;
+
+  String get _initial => name.isNotEmpty ? name[0].toUpperCase() : '?';
 
   @override
   Widget build(BuildContext context) {
@@ -273,51 +300,99 @@ class _EmptyBody extends StatelessWidget {
       children: [
         Row(
           children: [
-            Expanded(child: Text(name, style: CashierTheme.stationTitle(context, size: compact ? 15 : 16))),
+            Container(
+              width: compact ? 36 : 40,
+              height: compact ? 36 : 40,
+              decoration: BoxDecoration(
+                color: cardStyle.badgeFill,
+                borderRadius: BorderRadius.circular(CashierTheme.radiusControl),
+                border: Border.all(color: cardStyle.badgeBorder),
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                _initial,
+                style: TextStyle(
+                  fontSize: compact ? 16 : 18,
+                  fontWeight: FontWeight.w600,
+                  color: cardStyle.accent,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(name, style: CashierTheme.stationTitle(context, size: compact ? 14 : 15), maxLines: 1, overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 2),
+                  Text('Hazır', style: CashierTheme.caption(context)),
+                ],
+              ),
+            ),
             StatusBadge(label: 'Boş', status: status, hasSession: false),
           ],
         ),
-        const Spacer(),
-        Center(
-          child: Container(
-            width: compact ? 52 : 64,
-            height: compact ? 52 : 64,
-            decoration: BoxDecoration(
-              color: cardStyle.badgeFill,
-              shape: BoxShape.circle,
-            ),
-            child: Icon(Icons.sports_esports_rounded, size: compact ? 28 : 32, color: cardStyle.accent.withValues(alpha: 0.7)),
-          ),
-        ),
-        const SizedBox(height: 10),
-        Center(
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-            decoration: BoxDecoration(
-              color: CashierTheme.surfaceSecondary(context),
-              borderRadius: BorderRadius.circular(CashierTheme.radiusPill),
-            ),
-            child: Text(
-              '${rate.toStringAsFixed(2)} ₼ / saat',
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: CashierTheme.textSecondary(context)),
-            ),
-          ),
-        ),
-        const Spacer(),
-        Container(
+        const Spacer(flex: 1),
+        _MetaRow(icon: Icons.payments_outlined, label: 'Tariflər', value: rateSummary),
+        if (!compact) ...[
+          const SizedBox(height: 6),
+          _MetaRow(icon: Icons.event_available_outlined, label: 'Status', value: 'Sessiya gözləyir'),
+        ],
+        const Spacer(flex: 1),
+        SizedBox(
           width: double.infinity,
-          padding: const EdgeInsets.symmetric(vertical: 11),
-          decoration: BoxDecoration(
-            color: cardStyle.accent,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: const Text(
-            'Başlat',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14, letterSpacing: -0.2),
+          height: compact ? 34 : 36,
+          child: FilledButton(
+            onPressed: null,
+            style: FilledButton.styleFrom(
+              backgroundColor: CashierTheme.accent(context),
+              disabledBackgroundColor: CashierTheme.accent(context),
+              disabledForegroundColor: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(CashierTheme.radiusControl + 2)),
+              padding: EdgeInsets.zero,
+            ),
+            child: const Text('Sessiya aç', style: TextStyle(fontWeight: FontWeight.w500, fontSize: 13)),
           ),
         ),
       ],
+    );
+  }
+}
+
+class _MetaRow extends StatelessWidget {
+  const _MetaRow({required this.icon, required this.label, required this.value});
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: CashierTheme.surfaceSecondary(context),
+        borderRadius: BorderRadius.circular(CashierTheme.radiusControl),
+        border: Border.all(color: CashierTheme.border(context).withValues(alpha: 0.8)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 14, color: CashierTheme.textSecondary(context)),
+          const SizedBox(width: 8),
+          Expanded(child: Text(label, style: CashierTheme.caption(context), maxLines: 1, overflow: TextOverflow.ellipsis)),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              value,
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: CashierTheme.textPrimary(context)),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.end,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -15,6 +15,7 @@ use App\Modules\Products\ProductsController;
 use App\Modules\Receipts\ReceiptsController;
 use App\Modules\Reports\ReportsController;
 use App\Modules\Sessions\SessionsController;
+use App\Modules\SessionSets\SessionSetsController;
 use App\Modules\Settings\BusinessMediaController;
 use App\Modules\Settings\SettingsController;
 use App\Modules\Stock\StockController;
@@ -49,6 +50,7 @@ return function (App $app): void {
         $group->get('/customers', [CustomersController::class, 'index']);
         $group->post('/customers', [CustomersController::class, 'store']);
         $group->get('/stock/alerts', [StockController::class, 'alerts']);
+        $group->get('/session-sets', [SessionSetsController::class, 'index']);
 
         $group->get('/sessions/active', [SessionsController::class, 'active']);
         $group->get('/sessions/{id}', [SessionsController::class, 'show']);
@@ -84,6 +86,10 @@ return function (App $app): void {
             $admin->put('/products/{id}', [ProductsController::class, 'update']);
             $admin->post('/products/{id}/image', [ProductMediaController::class, 'upload']);
             $admin->delete('/products/{id}', [ProductsController::class, 'destroy']);
+
+            $admin->post('/session-sets', [SessionSetsController::class, 'store']);
+            $admin->put('/session-sets/{id}', [SessionSetsController::class, 'update']);
+            $admin->delete('/session-sets/{id}', [SessionSetsController::class, 'destroy']);
 
             $admin->get('/coupons', [CouponsController::class, 'index']);
             $admin->post('/coupons', [CouponsController::class, 'store']);

@@ -49,10 +49,13 @@ final class BillingCalculator
         return round(round($amount / $rounding) * $rounding, 2);
     }
 
-    public function calculateProductsTotal(array $items): float
+    public function calculateProductsTotal(array $items, bool $excludeSetItems = false): float
     {
         $total = 0.0;
         foreach ($items as $item) {
+            if ($excludeSetItems && !empty($item['is_set_item'])) {
+                continue;
+            }
             $total += (float) $item['unit_price'] * (int) $item['quantity'];
         }
 

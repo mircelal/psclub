@@ -67,18 +67,27 @@ SessionBillSnapshot computeSessionLiveBill(
     activeSeconds = activeSeconds.clamp(0, plannedMinutes * 60);
   }
 
-  final rate = jsonToDouble(session['hourly_rate_snapshot']);
-  final timeCharge = timeBillingEnabled
-      ? BillingCalculator.calculateTimeCharge(
-          activeSeconds: activeSeconds,
-          hourlyRate: rate,
-          billingMode: billingMode,
-        )
-      : 0.0;
+  final setPrice = jsonToDouble(session['set_price_snapshot']);
+  final double timeCharge;
+  if (setPrice > 0) {
+    timeCharge = setPrice;
+  } else {
+    final rate = jsonToDouble(session['hourly_rate_snapshot']);
+    timeCharge = timeBillingEnabled
+        ? BillingCalculator.calculateTimeCharge(
+            activeSeconds: activeSeconds,
+            hourlyRate: rate,
+            billingMode: billingMode,
+          )
+        : 0.0;
+  }
 
   var productsTotal = 0.0;
   for (final raw in items) {
     final i = raw as Map<String, dynamic>;
+    if (setPrice > 0 && (i['is_set_item'] == true || i['is_set_item'] == 1)) {
+      continue;
+    }
     productsTotal += jsonToDouble(i['unit_price']) * jsonToInt(i['quantity'], 1);
   }
   productsTotal = double.parse(productsTotal.toStringAsFixed(2));

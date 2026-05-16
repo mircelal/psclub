@@ -56,6 +56,29 @@ class DatabaseSeeder extends AbstractSeed
         }
         $this->table('tables')->insert($tables)->saveData();
 
+        $tariffs = [];
+        for ($i = 1; $i <= 4; $i++) {
+            $tariffs[] = [
+                'table_id' => $i,
+                'name' => 'PS5',
+                'hourly_rate' => 5.00,
+                'sort_order' => 0,
+                'is_active' => 1,
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ];
+            $tariffs[] = [
+                'table_id' => $i,
+                'name' => 'PS4',
+                'hourly_rate' => 3.00,
+                'sort_order' => 1,
+                'is_active' => 1,
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ];
+        }
+        $this->table('table_tariffs')->insert($tariffs)->saveData();
+
         $this->table('product_categories')->insert([
             ['business_id' => 1, 'name' => 'İçkilər', 'sort_order' => 1, 'created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')],
             ['business_id' => 1, 'name' => 'Snacks', 'sort_order' => 2, 'created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')],

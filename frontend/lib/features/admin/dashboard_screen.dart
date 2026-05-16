@@ -63,7 +63,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     final fmt = DateFormat('dd.MM.yyyy');
 
     return AdminPageLayout(
-      title: 'Statistika',
       subtitle: '${fmt.format(_from)} — ${fmt.format(_to)}',
       action: Row(
         mainAxisSize: MainAxisSize.min,
@@ -211,14 +210,18 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: color)),
-          const Spacer(),
           MoneyText(amount: total, size: MoneySize.large),
           const SizedBox(height: AppSpacing.xs),
-          Text('$sessions sessiya', style: Theme.of(context).textTheme.bodySmall),
-          Text('Vaxt: ${timeRev.toStringAsFixed(0)} ₼ • Məhsul: ${prodRev.toStringAsFixed(0)} ₼',
-              style: Theme.of(context).textTheme.bodySmall),
+          Text('$sessions sessiya', style: Theme.of(context).textTheme.bodySmall, maxLines: 1, overflow: TextOverflow.ellipsis),
+          Text(
+            'Vaxt: ${timeRev.toStringAsFixed(0)} ₼ • Məhsul: ${prodRev.toStringAsFixed(0)} ₼',
+            style: Theme.of(context).textTheme.bodySmall,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
         ],
       ),
     );

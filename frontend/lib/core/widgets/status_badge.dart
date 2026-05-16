@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../theme/app_spacing.dart';
+import '../theme/cashier_theme.dart';
 import '../theme/table_status_theme.dart';
 
 class StatusBadge extends StatelessWidget {
@@ -13,23 +13,24 @@ class StatusBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final style = context.tableStatusStyle(status, hasSession: hasSession);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: style.badgeFill,
-        borderRadius: BorderRadius.circular(100),
+        borderRadius: BorderRadius.circular(CashierTheme.radiusPill + 4),
+        border: Border.all(color: style.badgeBorder.withValues(alpha: 0.6)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            width: 5,
-            height: 5,
+            width: 6,
+            height: 6,
             decoration: BoxDecoration(color: style.accent, shape: BoxShape.circle),
           ),
-          const SizedBox(width: 5),
+          const SizedBox(width: 6),
           Text(
             label,
-            style: TextStyle(color: style.accent, fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: -0.1),
+            style: TextStyle(color: style.accent, fontSize: 11, fontWeight: FontWeight.w500),
           ),
         ],
       ),

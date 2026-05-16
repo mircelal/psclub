@@ -14,6 +14,28 @@ final class ReceiptService
     {
     }
 
+    private function setLine(array $session): ?string
+    {
+        $name = trim((string) ($session['set_name_snapshot'] ?? ''));
+        if ($name === '') {
+            return null;
+        }
+        $price = number_format((float) ($session['set_price_snapshot'] ?? 0), 2);
+
+        return "Paket: {$name} — {$price} AZN";
+    }
+
+    private function tariffLine(array $session): string
+    {
+        $rate = number_format((float) $session['hourly_rate_snapshot'], 2);
+        $name = trim((string) ($session['tariff_name_snapshot'] ?? ''));
+        if ($name !== '') {
+            return sprintf('Tarif: %s — %s AZN/saat', $name, $rate);
+        }
+
+        return 'Saatlıq: ' . $rate . ' AZN';
+    }
+
     public function buildReceipt(array $session, array $bill, string $method, float $cash, float $card): array
     {
         $settings = $this->getSettings();
@@ -27,7 +49,8 @@ final class ReceiptService
             ['type' => 'text', 'content' => 'Açılış: ' . $session['opened_at']],
             ['type' => 'text', 'content' => 'Bağlanış: ' . ($session['closed_at'] ?? date('Y-m-d H:i:s'))],
             ['type' => 'text', 'content' => 'Müddət: ' . $bill['active_minutes'] . ' dəq'],
-            ['type' => 'text', 'content' => 'Saatlıq: ' . number_format((float) $session['hourly_rate_snapshot'], 2) . ' AZN'],
+            ['type' => 'text', 'content' => $this->tariffLine($session)],
+            ...($this->setLine($session) !== null ? [['type' => 'text', 'content' => $this->setLine($session)]] : []),
             ['type' => 'text', 'content' => 'Vaxt cəmi: ' . number_format($bill['time_charge'], 2) . ' AZN'],
         ];
 

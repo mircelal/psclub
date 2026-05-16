@@ -23,7 +23,7 @@ class TablesLayout extends StatelessWidget {
   Widget build(BuildContext context) {
     return switch (viewMode) {
       TableViewMode.list => ListView.separated(
-          padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
           itemCount: tables.length,
           separatorBuilder: (_, __) => const SizedBox(height: 10),
           itemBuilder: (_, i) => TableListTile(
@@ -32,8 +32,8 @@ class TablesLayout extends StatelessWidget {
             onTap: () => _tap(tables[i]),
           ),
         ),
-      TableViewMode.card => _grid(context, _cardCrossCount(context), 0.92, compact: false),
-      TableViewMode.grid => _grid(context, _crossCount(context), 0.82, compact: _isCompactGrid(context)),
+      TableViewMode.card => _grid(context, _cardCrossCount(context), 0.88, compact: false),
+      TableViewMode.grid => _grid(context, _crossCount(context), 0.72, compact: _isCompactGrid(context)),
     };
   }
 
@@ -57,11 +57,11 @@ class TablesLayout extends StatelessWidget {
 
   Widget _grid(BuildContext context, int cross, double aspect, {required bool compact}) {
     return GridView.builder(
-      padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: cross,
-        crossAxisSpacing: 14,
-        mainAxisSpacing: 14,
+        crossAxisSpacing: 12,
+        mainAxisSpacing: 12,
         childAspectRatio: aspect,
       ),
       itemCount: tables.length,

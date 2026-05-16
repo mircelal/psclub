@@ -11,6 +11,8 @@ import 'dashboard_screen.dart';
 import 'orders_screen.dart';
 import 'products_screen.dart';
 import 'reports_screen.dart';
+import 'customers_screen.dart';
+import 'session_sets_screen.dart';
 import 'settings_screen.dart';
 import 'stock_screen.dart';
 import 'tables_screen.dart';
@@ -31,6 +33,8 @@ class _AdminShellState extends ConsumerState<AdminShell> {
     (Icons.receipt_long_outlined, Icons.receipt_long, 'Sifarişlər'),
     (Icons.table_bar_outlined, Icons.table_bar, 'Masalar'),
     (Icons.inventory_2_outlined, Icons.inventory_2, 'Məhsullar'),
+    (Icons.restaurant_menu_outlined, Icons.restaurant_menu, 'Paketlər'),
+    (Icons.contacts_outlined, Icons.contacts, 'Müştərilər'),
     (Icons.warehouse_outlined, Icons.warehouse, 'Stok'),
     (Icons.people_outline, Icons.people, 'İstifadəçilər'),
     (Icons.tune_outlined, Icons.tune, 'Parametrlər'),
@@ -43,11 +47,13 @@ class _AdminShellState extends ConsumerState<AdminShell> {
         1 => const OrdersScreen(),
         2 => const TablesScreen(),
         3 => const ProductsScreen(),
-        4 => const StockScreen(),
-        5 => const UsersScreen(),
-        6 => const SettingsScreen(),
-        7 => const ReportsScreen(),
-        8 => const AuditScreen(),
+        4 => const SessionSetsScreen(),
+        5 => const CustomersScreen(),
+        6 => const StockScreen(),
+        7 => const UsersScreen(),
+        8 => const SettingsScreen(),
+        9 => const ReportsScreen(),
+        10 => const AuditScreen(),
         _ => const SizedBox(),
       };
 
@@ -106,10 +112,12 @@ class _AdminShellState extends ConsumerState<AdminShell> {
           children: [
             ListTile(leading: const Icon(Icons.dashboard), title: const Text('Statistika'), onTap: () { Navigator.pop(ctx); setState(() => _index = 0); }),
             ListTile(leading: const Icon(Icons.receipt_long), title: const Text('Sifarişlər'), onTap: () { Navigator.pop(ctx); setState(() => _index = 1); }),
-            ListTile(leading: const Icon(Icons.people), title: const Text('İstifadəçilər'), onTap: () { Navigator.pop(ctx); setState(() => _index = 5); }),
-            ListTile(leading: const Icon(Icons.tune), title: const Text('Parametrlər'), onTap: () { Navigator.pop(ctx); setState(() => _index = 6); }),
-            ListTile(leading: const Icon(Icons.bar_chart), title: const Text('Hesabatlar'), onTap: () { Navigator.pop(ctx); setState(() => _index = 7); }),
-            ListTile(leading: const Icon(Icons.history), title: const Text('Audit'), onTap: () { Navigator.pop(ctx); setState(() => _index = 8); }),
+            ListTile(leading: const Icon(Icons.restaurant_menu), title: const Text('Paketlər'), onTap: () { Navigator.pop(ctx); setState(() => _index = 4); }),
+            ListTile(leading: const Icon(Icons.contacts), title: const Text('Müştərilər'), onTap: () { Navigator.pop(ctx); setState(() => _index = 5); }),
+            ListTile(leading: const Icon(Icons.people), title: const Text('İstifadəçilər'), onTap: () { Navigator.pop(ctx); setState(() => _index = 7); }),
+            ListTile(leading: const Icon(Icons.tune), title: const Text('Parametrlər'), onTap: () { Navigator.pop(ctx); setState(() => _index = 8); }),
+            ListTile(leading: const Icon(Icons.bar_chart), title: const Text('Hesabatlar'), onTap: () { Navigator.pop(ctx); setState(() => _index = 9); }),
+            ListTile(leading: const Icon(Icons.history), title: const Text('Audit'), onTap: () { Navigator.pop(ctx); setState(() => _index = 10); }),
           ],
         ),
       ),

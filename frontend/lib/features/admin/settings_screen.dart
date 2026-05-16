@@ -5,6 +5,8 @@ import '../../core/about/app_about.dart';
 import '../../core/config/business_config_provider.dart';
 import '../../core/config/venue_labels.dart';
 import '../../core/settings/app_settings.dart';
+import '../../core/settings/desktop_window_service.dart';
+import '../../core/settings/kiosk_settings_tiles.dart';
 import '../../core/settings/ui_settings_sheet.dart';
 import '../../core/theme/app_palette.dart';
 import '../../core/theme/app_spacing.dart';
@@ -262,6 +264,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 ],
               ),
             ),
+            if (DesktopWindowService.isDesktop) ...[
+              const SizedBox(height: AppSpacing.xxl),
+              _SettingsSection(
+                title: 'Kiosk və Windows',
+                subtitle: 'Kassir terminalı üçün tam ekran və avtomatik işə düşmə',
+                child: const KioskSettingsTiles(),
+              ),
+            ],
             const SizedBox(height: AppSpacing.xxl),
             _SettingsSection(
               title: 'Qəbz parametrləri',

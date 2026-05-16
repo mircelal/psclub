@@ -6,6 +6,7 @@ import '../../core/auth/auth_state.dart';
 import '../../core/config/business_config_provider.dart';
 import '../../core/settings/app_settings.dart';
 import '../../core/settings/ui_settings_sheet.dart';
+import '../../core/theme/app_spacing.dart';
 import '../../core/theme/cashier_theme.dart';
 import '../../core/utils/json_parse.dart';
 import '../../core/widgets/app_snackbar.dart';
@@ -13,7 +14,7 @@ import '../../core/widgets/empty_state.dart';
 import '../../services/pos_service.dart';
 import 'show_session_panel.dart';
 import 'widgets/cashier_filter_bar.dart';
-import 'widgets/cashier_stats_row.dart';
+import 'widgets/cashier_side_rail.dart';
 import 'widgets/cashier_top_bar.dart';
 import 'widgets/open_table_dialog.dart';
 import 'widgets/tables_layout.dart';
@@ -55,13 +56,16 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
   }
 
   Future<void> _openTable(Map<String, dynamic> table) async {
-    final result = await showOpenTableDialog(context, table['name'] as String);
+    final result = await showOpenTableDialog(context, table);
     if (result == null || !result.confirmed) return;
 
     try {
       final session = await ref.read(posServiceProvider).openSession(
             table['id'] as int,
             plannedMinutes: result.plannedMinutes,
+            tariffId: result.tariffId,
+            setId: result.setId,
+            customerId: result.customerId,
           );
       if (!mounted) return;
       showSessionPanel(context, ref, session['id'] as int, () => ref.invalidate(tablesProvider));
@@ -106,69 +110,139 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
     final viewMode = uiSettings?.tableViewMode ?? TableViewMode.grid;
     final biz = ref.watch(businessConfigProvider).valueOrNull ?? BusinessConfig.fallback;
 
+    final list = tablesAsync.valueOrNull?.cast<Map<String, dynamic>>() ?? [];
+    final active = list.where((t) => t['status'] == 'active' || t['status'] == 'paused').length;
+    final empty = list.where((t) => t['status'] == 'empty').length;
+    final revenue = _liveRevenue(list);
+
     return Scaffold(
       backgroundColor: CashierTheme.scaffoldBg(context),
-      body: Column(
+      body: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          CashierTopBar(
+          CashierSideRail(
             biz: biz,
             userName: user?.fullName ?? user?.username ?? '',
-            liveRevenue: tablesAsync.maybeWhen(data: (t) => _liveRevenue(t.cast()), orElse: () => 0),
+            active: active,
+            empty: empty,
+            total: list.length,
+            liveRevenue: revenue,
+            filter: _filter,
+            onFilterChanged: (f) => setState(() => _filter = f),
             onRefresh: () => ref.invalidate(tablesProvider),
             onSettings: () => showUiSettingsSheet(context),
             onAdmin: user?.isAdmin == true ? () => context.go('/admin') : null,
             onLogout: () => ref.read(authProvider.notifier).logout(),
           ),
           Expanded(
-            child: tablesAsync.when(
-              loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-              error: (e, _) => EmptyState(
-                icon: Icons.cloud_off_outlined,
-                title: 'Serverə qoşulmaq olmur',
-                subtitle: e.toString(),
-                action: FilledButton.icon(
-                  onPressed: () => ref.invalidate(tablesProvider),
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('Yenidən cəhd et'),
+            child: ColoredBox(
+              color: CashierTheme.surfaceMain(context),
+              child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                CashierTopBar(
+                  biz: biz,
+                  liveRevenue: revenue,
+                  activeCount: active,
+                  totalCount: list.length,
                 ),
-              ),
-              data: (tables) {
-                final list = tables.cast<Map<String, dynamic>>();
-                final filtered = _applyFilter(list);
-                final active = list.where((t) => t['status'] == 'active' || t['status'] == 'paused').length;
-                final empty = list.where((t) => t['status'] == 'empty').length;
-                final revenue = _liveRevenue(list);
-
-                return Column(
-                  children: [
-                    CashierStatsRow(active: active, empty: empty, total: list.length, liveRevenue: revenue),
-                    CashierFilterBar(
-                      filter: _filter,
-                      onChanged: (f) => setState(() => _filter = f),
-                      unitLabel: biz.labels.unitPlural,
-                    ),
-                    Expanded(
-                      child: filtered.isEmpty
-                          ? Center(
-                              child: Text(
-                                'Bu filtrə uyğun stansiya yoxdur',
-                                style: TextStyle(color: CashierTheme.textSecondary(context)),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.lg),
+                    child: DecoratedBox(
+                      decoration: CashierTheme.contentPanelDecoration(context),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(CashierTheme.radiusCard + 2),
+                        child: tablesAsync.when(
+                          loading: () => Center(
+                            child: SizedBox(
+                              width: 28,
+                              height: 28,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.5,
+                                color: CashierTheme.accent(context),
                               ),
-                            )
-                          : TablesLayout(
+                            ),
+                          ),
+                          error: (e, _) => EmptyState(
+                            icon: Icons.cloud_off_outlined,
+                            title: 'Serverə qoşulmaq olmur',
+                            subtitle: e.toString(),
+                            action: FilledButton.icon(
+                              onPressed: () => ref.invalidate(tablesProvider),
+                              icon: const Icon(Icons.refresh),
+                              label: const Text('Yenidən cəhd et'),
+                            ),
+                          ),
+                          data: (tables) {
+                            final all = tables.cast<Map<String, dynamic>>();
+                            final filtered = _applyFilter(all);
+
+                            if (filtered.isEmpty) {
+                              return _EmptyFilterState(filter: _filter);
+                            }
+
+                            return TablesLayout(
                               tables: filtered,
                               viewMode: viewMode,
                               tick: _tick,
                               onOpen: _openTable,
                               onSession: _showSession,
-                            ),
+                            );
+                          },
+                        ),
+                      ),
                     ),
-                  ],
-                );
-              },
+                  ),
+                ),
+              ],
+            ),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _EmptyFilterState extends StatelessWidget {
+  const _EmptyFilterState({required this.filter});
+
+  final CashierTableFilter filter;
+
+  @override
+  Widget build(BuildContext context) {
+    final (icon, title, subtitle) = switch (filter) {
+      CashierTableFilter.active => (
+          Icons.hourglass_empty_outlined,
+          'Aktiv sessiya yoxdur',
+          'Hal-hazırda heç bir stansiya işləmir.',
+        ),
+      CashierTableFilter.empty => (
+          Icons.event_available_outlined,
+          'Boş stansiya yoxdur',
+          'Bütün stansiyalar məşğuldur.',
+        ),
+      CashierTableFilter.all => (
+          Icons.table_restaurant_outlined,
+          'Stansiya tapılmadı',
+          'Sistemdə stansiya qeydiyyatı yoxdur.',
+        ),
+    };
+
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 360),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 48, color: CashierTheme.textTertiary(context)),
+            const SizedBox(height: 16),
+            Text(title, style: CashierTheme.stationTitle(context, size: 16), textAlign: TextAlign.center),
+            const SizedBox(height: 8),
+            Text(subtitle, style: CashierTheme.caption(context), textAlign: TextAlign.center),
+          ],
+        ),
       ),
     );
   }

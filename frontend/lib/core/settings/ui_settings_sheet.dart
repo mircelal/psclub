@@ -4,6 +4,8 @@ import '../theme/app_palette.dart';
 import '../theme/app_spacing.dart';
 import '../about/app_about.dart';
 import 'app_settings.dart';
+import 'desktop_window_service.dart';
+import 'kiosk_settings_tiles.dart';
 
 void showUiSettingsSheet(BuildContext context) {
   final parentContext = context;
@@ -86,6 +88,10 @@ class _UiSettingsSheet extends ConsumerWidget {
               'Aktiv masalarda timer və məbləğ real vaxtda yenilənir. Müddətli açılışda geri sayım göstərilir.',
               style: Theme.of(context).textTheme.bodySmall,
             ),
+            if (DesktopWindowService.isDesktop) ...[
+              const SizedBox(height: AppSpacing.xxl),
+              const KioskSettingsTiles(dense: true),
+            ],
             const SizedBox(height: AppSpacing.xxl),
             const Divider(),
             const SizedBox(height: AppSpacing.lg),
