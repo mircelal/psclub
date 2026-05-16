@@ -1,0 +1,49 @@
+name: psclub_pos
+description: PS Club POS - PlayStation klubu kassir və admin
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.5
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  dio: ^5.7.0
+  flutter_riverpod: ^2.6.1
+  go_router: ^14.6.2
+  flutter_secure_storage: ^9.2.4
+  intl: ^0.20.1
+  shared_preferences: ^2.3.4
+  file_picker: ^8.1.7
+  printing: ^5.13.4
+  pdf: ^3.11.1
+  url_launcher: ^6.3.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.3
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: assets/icons/app_icon.png
+  adaptive_icon_background: "#00000000"
+  adaptive_icon_foreground: assets/icons/app_icon.png
+  web:
+    generate: true
+    image_path: assets/icons/app_icon.png
+    background_color: "#0D0F14"
+    theme_color: "#7C5CFC"
+  windows:
+    generate: true
+    image_path: assets/icons/app_icon.png
+    icon_size: 256
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/icons/
