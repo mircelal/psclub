@@ -16,11 +16,17 @@ import 'show_session_panel.dart';
 import 'widgets/cashier_filter_bar.dart';
 import 'widgets/cashier_side_rail.dart';
 import 'widgets/cashier_top_bar.dart';
+import 'widgets/counter_sales_bar.dart';
+import 'widgets/open_counter_sale_dialog.dart';
 import 'widgets/open_table_dialog.dart';
 import 'widgets/tables_layout.dart';
 
 final tablesProvider = FutureProvider.autoDispose<List<dynamic>>((ref) async {
   return ref.read(posServiceProvider).getTables();
+});
+
+final activeSessionsProvider = FutureProvider.autoDispose<List<dynamic>>((ref) async {
+  return ref.read(posServiceProvider).getActiveSessions();
 });
 
 class CashierHome extends ConsumerStatefulWidget {
@@ -42,7 +48,10 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(productsProvider.future);
     });
-    _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) => ref.invalidate(tablesProvider));
+    _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      ref.invalidate(tablesProvider);
+      ref.invalidate(activeSessionsProvider);
+    });
     _tickTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _tick++);
     });
@@ -68,15 +77,34 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
             customerId: result.customerId,
           );
       if (!mounted) return;
-      showSessionPanel(context, ref, session['id'] as int, () => ref.invalidate(tablesProvider));
-      ref.invalidate(tablesProvider);
+      showSessionPanel(context, ref, session['id'] as int, _onSessionChanged);
+      _onSessionChanged();
     } catch (e) {
       if (mounted) showAppSnackBar(context, e.toString(), isError: true);
     }
   }
 
+  void _onSessionChanged() {
+    ref.invalidate(tablesProvider);
+    ref.invalidate(activeSessionsProvider);
+  }
+
   void _showSession(int sessionId) {
-    showSessionPanel(context, ref, sessionId, () => ref.invalidate(tablesProvider));
+    showSessionPanel(context, ref, sessionId, _onSessionChanged);
+  }
+
+  Future<void> _startCounterSale() async {
+    final result = await showOpenCounterSaleDialog(context);
+    if (result == null || !result.confirmed) return;
+
+    try {
+      final session = await ref.read(posServiceProvider).openCounterSale(customerId: result.customerId);
+      if (!mounted) return;
+      showSessionPanel(context, ref, session['id'] as int, _onSessionChanged);
+      _onSessionChanged();
+    } catch (e) {
+      if (mounted) showAppSnackBar(context, e.toString(), isError: true);
+    }
   }
 
   List<Map<String, dynamic>> _applyFilter(List<Map<String, dynamic>> list) {
@@ -106,6 +134,11 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
   Widget build(BuildContext context) {
     final user = ref.watch(authProvider).valueOrNull;
     final tablesAsync = ref.watch(tablesProvider);
+    final activeSessionsAsync = ref.watch(activeSessionsProvider);
+    final counterSessions = (activeSessionsAsync.valueOrNull ?? [])
+        .cast<Map<String, dynamic>>()
+        .where((s) => (s['session_type'] ?? 'table') == 'counter')
+        .toList();
     final uiSettings = ref.watch(appSettingsProvider).valueOrNull;
     final viewMode = uiSettings?.tableViewMode ?? TableViewMode.grid;
     final biz = ref.watch(businessConfigProvider).valueOrNull ?? BusinessConfig.fallback;
@@ -129,7 +162,11 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
             liveRevenue: revenue,
             filter: _filter,
             onFilterChanged: (f) => setState(() => _filter = f),
-            onRefresh: () => ref.invalidate(tablesProvider),
+            onCounterSale: _startCounterSale,
+            onRefresh: () {
+              ref.invalidate(tablesProvider);
+              ref.invalidate(activeSessionsProvider);
+            },
             onSettings: () => showUiSettingsSheet(context),
             onAdmin: user?.isAdmin == true ? () => context.go('/admin') : null,
             onLogout: () => ref.read(authProvider.notifier).logout(),
@@ -145,6 +182,12 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
                   liveRevenue: revenue,
                   activeCount: active,
                   totalCount: list.length,
+                  onCounterSale: _startCounterSale,
+                ),
+                CounterSalesBar(
+                  sessions: counterSessions,
+                  onNewSale: _startCounterSale,
+                  onOpenSession: _showSession,
                 ),
                 Expanded(
                   child: Padding(

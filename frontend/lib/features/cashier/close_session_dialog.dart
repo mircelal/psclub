@@ -21,10 +21,12 @@ class CloseSessionDialog extends ConsumerStatefulWidget {
     super.key,
     required this.sessionId,
     this.tableName = '',
+    this.isCounter = false,
   });
 
   final int sessionId;
   final String tableName;
+  final bool isCounter;
 
   @override
   ConsumerState<CloseSessionDialog> createState() => _CloseSessionDialogState();
@@ -51,10 +53,11 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
     try {
       final session = await ref.read(posServiceProvider).getSession(widget.sessionId);
       final config = await ref.read(businessConfigProvider.future);
+      final isCounter = widget.isCounter || (session['session_type'] ?? 'table') == 'counter';
       final live = computeSessionLiveBill(
         session,
         billingMode: config.billingMode,
-        timeBillingEnabled: config.timeBillingEnabled,
+        timeBillingEnabled: !isCounter && config.timeBillingEnabled,
       );
       if (mounted) {
         setState(() {
@@ -219,7 +222,7 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Hesabı bağla', style: Theme.of(context).textTheme.titleLarge),
+                        Text(widget.isCounter ? 'Satışı bağla' : 'Hesabı bağla', style: Theme.of(context).textTheme.titleLarge),
                         Text(
                           widget.tableName.isNotEmpty ? widget.tableName : config.labels.unitSingular,
                           style: Theme.of(context).textTheme.bodyMedium,

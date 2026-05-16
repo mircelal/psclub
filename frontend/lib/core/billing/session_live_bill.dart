@@ -67,9 +67,12 @@ SessionBillSnapshot computeSessionLiveBill(
     activeSeconds = activeSeconds.clamp(0, plannedMinutes * 60);
   }
 
+  final isCounter = (session['session_type'] ?? 'table') == 'counter';
   final setPrice = jsonToDouble(session['set_price_snapshot']);
   final double timeCharge;
-  if (setPrice > 0) {
+  if (isCounter) {
+    timeCharge = 0.0;
+  } else if (setPrice > 0) {
     timeCharge = setPrice;
   } else {
     final rate = jsonToDouble(session['hourly_rate_snapshot']);

@@ -18,6 +18,7 @@ class CashierSideRail extends StatelessWidget {
     required this.filter,
     required this.onFilterChanged,
     required this.onRefresh,
+    required this.onCounterSale,
     required this.onSettings,
     required this.onLogout,
     this.onAdmin,
@@ -32,6 +33,7 @@ class CashierSideRail extends StatelessWidget {
   final CashierTableFilter filter;
   final ValueChanged<CashierTableFilter> onFilterChanged;
   final VoidCallback onRefresh;
+  final VoidCallback onCounterSale;
   final VoidCallback onSettings;
   final VoidCallback onLogout;
   final VoidCallback? onAdmin;
@@ -46,61 +48,86 @@ class CashierSideRail extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, AppSpacing.md),
-              child: Row(
-                children: [
-                  const BusinessLogo(size: 36),
-                  const SizedBox(width: AppSpacing.md),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          biz.name,
-                          style: CashierTheme.stationTitle(context, size: 15),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 2),
-                        Text('Kassir paneli', style: CashierTheme.caption(context)),
-                      ],
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, AppSpacing.md),
+                      child: Row(
+                        children: [
+                          const BusinessLogo(size: 36),
+                          const SizedBox(width: AppSpacing.md),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  biz.name,
+                                  style: CashierTheme.stationTitle(context, size: 15),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 2),
+                                Text('Kassir paneli', style: CashierTheme.caption(context)),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+                      child: _UserTile(name: userName),
+                    ),
+                    const SizedBox(height: AppSpacing.lg),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+                      child: Text('GÜNDƏLİK', style: CashierTheme.sectionTitle(context)),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+                      child: CashierStatsRow(
+                        active: active,
+                        empty: empty,
+                        total: total,
+                        liveRevenue: liveRevenue,
+                        vertical: true,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.lg),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.tonalIcon(
+                          onPressed: onCounterSale,
+                          icon: const Icon(Icons.shopping_bag_outlined, size: 20),
+                          label: const Text('Birbaşa satış'),
+                          style: FilledButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            alignment: Alignment.centerLeft,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+                      child: CashierFilterBar(
+                        filter: filter,
+                        onChanged: onFilterChanged,
+                        unitLabel: biz.labels.unitPlural,
+                        compact: true,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-              child: _UserTile(name: userName),
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-              child: Text('GÜNDƏLİK', style: CashierTheme.sectionTitle(context)),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-              child: CashierStatsRow(
-                active: active,
-                empty: empty,
-                total: total,
-                liveRevenue: liveRevenue,
-                vertical: true,
-              ),
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-              child: CashierFilterBar(
-                filter: filter,
-                onChanged: onFilterChanged,
-                unitLabel: biz.labels.unitPlural,
-                compact: true,
-              ),
-            ),
-            const Spacer(),
             const Divider(height: 1),
             Padding(
               padding: const EdgeInsets.all(AppSpacing.md),

@@ -10,12 +10,14 @@ class CashierTopBar extends StatelessWidget {
     required this.liveRevenue,
     required this.activeCount,
     required this.totalCount,
+    required this.onCounterSale,
   });
 
   final BusinessConfig biz;
   final double liveRevenue;
   final int activeCount;
   final int totalCount;
+  final VoidCallback onCounterSale;
 
   @override
   Widget build(BuildContext context) {
@@ -44,6 +46,15 @@ class CashierTopBar extends StatelessWidget {
                 ],
               ),
             ),
+            FilledButton.icon(
+              onPressed: onCounterSale,
+              icon: const Icon(Icons.shopping_bag_outlined, size: 18),
+              label: const Text('Birbaşa satış'),
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.lg),
             if (liveRevenue > 0) ...[
               _RevenueBadge(amount: liveRevenue, currency: biz.currency),
               const SizedBox(width: AppSpacing.lg),

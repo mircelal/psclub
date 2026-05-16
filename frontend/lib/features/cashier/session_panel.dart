@@ -59,13 +59,15 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
     super.dispose();
   }
 
+  bool get _isCounter => (_session?['session_type'] ?? 'table') == 'counter';
+
   SessionBillSnapshot? _liveBill() {
     if (_session == null) return null;
     final config = ref.read(businessConfigProvider).valueOrNull ?? BusinessConfig.fallback;
     return computeSessionLiveBill(
       _session!,
       billingMode: config.billingMode,
-      timeBillingEnabled: config.timeBillingEnabled,
+      timeBillingEnabled: !_isCounter && config.timeBillingEnabled,
     );
   }
 
@@ -299,6 +301,13 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
 
   Widget _header(AppPalette p) {
     final status = _session!['status'] as String;
+    final customerName = _session!['customer_name'] as String?;
+    final title = _isCounter
+        ? (_session!['table_name'] as String? ?? 'Birbaşa satış')
+        : (_session!['table_name'] as String? ?? 'Masa');
+    final subtitle = _isCounter
+        ? (customerName != null && customerName.isNotEmpty ? customerName : 'Masa olmadan məhsul satışı')
+        : 'Sessiya #${widget.sessionId}';
 
     return Padding(
       padding: EdgeInsets.fromLTRB(
@@ -313,8 +322,8 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(_session!['table_name'] as String? ?? 'Masa', style: Theme.of(context).textTheme.headlineMedium),
-                Text('Sessiya #${widget.sessionId}', style: Theme.of(context).textTheme.bodySmall),
+                Text(title, style: Theme.of(context).textTheme.headlineMedium),
+                Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
               ],
             ),
           ),
@@ -397,25 +406,29 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
           productsTotal: live.productsTotal,
           total: live.totalAmount,
           activeMinutes: live.activeMinutes,
-          timeLabel: config.timeBillingEnabled ? '${config.labels.rateLabel} (${live.activeMinutes} dəq)' : null,
+          timeLabel: !_isCounter && config.timeBillingEnabled && live.timeCharge > 0
+              ? '${config.labels.rateLabel} (${live.activeMinutes} dəq)'
+              : null,
         ),
         const SizedBox(height: AppSpacing.lg),
         Row(
           children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _actionLoading ? null : _togglePause,
-                icon: Icon(status == 'active' ? Icons.pause : Icons.play_arrow),
-                label: Text(status == 'active' ? 'Pause' : 'Davam'),
+            if (!_isCounter) ...[
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _actionLoading ? null : _togglePause,
+                  icon: Icon(status == 'active' ? Icons.pause : Icons.play_arrow),
+                  label: Text(status == 'active' ? 'Pause' : 'Davam'),
+                ),
               ),
-            ),
-            const SizedBox(width: AppSpacing.md),
+              const SizedBox(width: AppSpacing.md),
+            ],
             Expanded(
-              flex: 2,
+              flex: _isCounter ? 1 : 2,
               child: FilledButton.icon(
                 onPressed: () => _closeSession(),
                 icon: const Icon(Icons.payment),
-                label: const Text('Hesabı bağla'),
+                label: Text(_isCounter ? 'Ödənişi al' : 'Hesabı bağla'),
                 style: FilledButton.styleFrom(
                   backgroundColor: payColor,
                   foregroundColor: Colors.white,
@@ -436,6 +449,7 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
       builder: (_) => CloseSessionDialog(
         sessionId: widget.sessionId,
         tableName: _session!['table_name'] as String? ?? '',
+        isCounter: _isCounter,
       ),
     );
     if (closed == true && context.mounted) {
