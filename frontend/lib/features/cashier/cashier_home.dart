@@ -28,6 +28,7 @@ import 'cashier_shortcuts.dart';
 import 'widgets/tables_layout.dart';
 import 'shift_provider.dart';
 import 'shift_dialogs.dart';
+import 'shift_guard.dart';
 
 final tablesProvider = FutureProvider.autoDispose<List<dynamic>>((ref) async {
   return ref.read(posServiceProvider).getTables();
@@ -72,6 +73,7 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
   }
 
   Future<void> _openTable(Map<String, dynamic> table) async {
+    if (!await ensureOpenShiftForCashier(context, ref)) return;
     final result = await showOpenTableDialog(context, table);
     if (result == null || !result.confirmed) return;
 
@@ -95,11 +97,14 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
     ref.invalidate(tablesProvider);
   }
 
-  void _showSession(int sessionId) {
+  Future<void> _showSession(int sessionId) async {
+    if (!await ensureOpenShiftForCashier(context, ref)) return;
+    if (!mounted) return;
     showSessionPanel(context, ref, sessionId, _onSessionChanged);
   }
 
   Future<void> _startCounterSale() async {
+    if (!await ensureOpenShiftForCashier(context, ref)) return;
     final result = await showOpenCounterSaleDialog(context);
     if (result == null || !result.confirmed) return;
 
@@ -129,7 +134,8 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
     return _applyFilter(list);
   }
 
-  void _activateTableSlot(int slot) {
+  Future<void> _activateTableSlot(int slot) async {
+    if (!await ensureOpenShiftForCashier(context, ref)) return;
     final tables = _filteredTables();
     final index = slot - 1;
     if (index < 0 || index >= tables.length) return;
@@ -162,8 +168,12 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
     await showOpenShiftDialog(context, ref);
   }
 
-  Future<void> _handleCashMovement(Map<String, dynamic> shift) async {
-    await showCashMovementDialog(context, ref, shift['id'] as int);
+  Future<void> _handleCashIn(Map<String, dynamic> shift) async {
+    await showCashPayInDialog(context, ref, shift['id'] as int);
+  }
+
+  Future<void> _handleCashOut(Map<String, dynamic> shift) async {
+    await showCashOutDialog(context, ref, shift['id'] as int);
   }
 
   Future<void> _handleCloseShift(Map<String, dynamic> shift) async {
@@ -198,6 +208,7 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
     final revenue = _liveRevenue(list);
 
     final isAdmin = user?.isAdmin == true;
+    final needsShift = !isAdmin && currentShift == null && !shiftAsync.isLoading;
 
     Widget buildSideRail({required bool inDrawer}) {
       return CashierSideRail(
@@ -211,7 +222,8 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
         filter: _filter,
         shift: currentShift,
         onOpenShift: _handleOpenShift,
-        onCashMovement: currentShift != null ? () => _handleCashMovement(currentShift) : null,
+        onCashIn: currentShift != null ? () => _handleCashIn(currentShift) : null,
+        onCashOut: currentShift != null ? () => _handleCashOut(currentShift) : null,
         onCloseShift: currentShift != null ? () => _handleCloseShift(currentShift) : null,
         onFilterChanged: (f) {
           setState(() => _filter = f);
@@ -278,61 +290,67 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
             ],
             if (bp.isDesktop) CounterSaleToolbar(onNewSale: _startCounterSale),
             Expanded(
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(padH, padT, padH, padH),
-                child: DecoratedBox(
-                  decoration: CashierTheme.contentPanelDecoration(context),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(CashierTheme.radiusCard + 2),
-                    child: tablesAsync.when(
-                      loading: () => Center(
-                        child: SizedBox(
-                          width: 28,
-                          height: 28,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2.5,
-                            color: CashierTheme.accent(context),
+              child: Stack(
+                children: [
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(padH, padT, padH, padH),
+                    child: DecoratedBox(
+                      decoration: CashierTheme.contentPanelDecoration(context),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(CashierTheme.radiusCard + 2),
+                        child: tablesAsync.when(
+                          loading: () => Center(
+                            child: SizedBox(
+                              width: 28,
+                              height: 28,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.5,
+                                color: CashierTheme.accent(context),
+                              ),
+                            ),
                           ),
+                          error: (e, _) => EmptyState(
+                            icon: Icons.cloud_off_outlined,
+                            title: 'Serverə qoşulmaq olmur',
+                            subtitle: e.toString(),
+                            action: FilledButton.icon(
+                              onPressed: () => ref.invalidate(tablesProvider),
+                              icon: const Icon(Icons.refresh),
+                              label: const Text('Yenidən cəhd et'),
+                            ),
+                          ),
+                          data: (tables) {
+                            final all = tables.cast<Map<String, dynamic>>();
+                            final filtered = _applyFilter(all);
+
+                            if (filtered.isEmpty) {
+                              return _EmptyFilterState(filter: _filter);
+                            }
+
+                            return TablesLayout(
+                              tables: filtered,
+                              viewMode: viewMode,
+                              tick: _tick,
+                              onOpen: _openTable,
+                              onSession: _showSession,
+                              onTableContextMenu: (table, details) => showTableContextMenu(
+                                context: context,
+                                ref: ref,
+                                table: table,
+                                globalPosition: details.globalPosition,
+                                onOpenTable: _openTable,
+                                onOpenSession: _showSession,
+                                onChanged: _onSessionChanged,
+                              ),
+                            );
+                          },
                         ),
                       ),
-                      error: (e, _) => EmptyState(
-                        icon: Icons.cloud_off_outlined,
-                        title: 'Serverə qoşulmaq olmur',
-                        subtitle: e.toString(),
-                        action: FilledButton.icon(
-                          onPressed: () => ref.invalidate(tablesProvider),
-                          icon: const Icon(Icons.refresh),
-                          label: const Text('Yenidən cəhd et'),
-                        ),
-                      ),
-                      data: (tables) {
-                        final all = tables.cast<Map<String, dynamic>>();
-                        final filtered = _applyFilter(all);
-
-                        if (filtered.isEmpty) {
-                          return _EmptyFilterState(filter: _filter);
-                        }
-
-                        return TablesLayout(
-                          tables: filtered,
-                          viewMode: viewMode,
-                          tick: _tick,
-                          onOpen: _openTable,
-                          onSession: _showSession,
-                          onTableContextMenu: (table, details) => showTableContextMenu(
-                            context: context,
-                            ref: ref,
-                            table: table,
-                            globalPosition: details.globalPosition,
-                            onOpenTable: _openTable,
-                            onOpenSession: _showSession,
-                            onChanged: _onSessionChanged,
-                          ),
-                        );
-                      },
                     ),
                   ),
-                ),
+                  if (needsShift)
+                    _ShiftRequiredOverlay(onOpenShift: _handleOpenShift),
+                ],
               ),
             ),
           ],
@@ -374,6 +392,51 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
               ),
             );
           },
+        ),
+      ),
+    );
+  }
+}
+
+class _ShiftRequiredOverlay extends StatelessWidget {
+  const _ShiftRequiredOverlay({required this.onOpenShift});
+
+  final VoidCallback onOpenShift;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: CashierTheme.scaffoldBg(context).withValues(alpha: 0.94),
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 380),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.lock_outline, size: 52, color: CashierTheme.textTertiary(context)),
+                const SizedBox(height: 20),
+                Text(
+                  'Növbə açılmayıb',
+                  style: CashierTheme.stationTitle(context, size: 20),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Satışa başlamaq üçün əvvəlcə kassadakı nağdı daxil edib günün növbəsini açın.',
+                  style: CashierTheme.caption(context),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                FilledButton.icon(
+                  onPressed: onOpenShift,
+                  icon: const Icon(Icons.play_arrow_rounded),
+                  label: const Text('Növbəni aç'),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

@@ -44,7 +44,105 @@ Future<bool> showOpenShiftDialog(BuildContext context, WidgetRef ref) async {
   }
 }
 
-Future<void> showCashMovementDialog(BuildContext context, WidgetRef ref, int shiftId) async {
+const _payInNoteHints = [
+  'Sahibkar verdi',
+  'Dəyişiklik üçün əlavə',
+  'Bankdan nağd götürüldü',
+  'Digər',
+];
+
+/// Kassaya nağd əlavə (sahibkar verdi, dəyişiklik və s.).
+Future<void> showCashPayInDialog(BuildContext context, WidgetRef ref, int shiftId) async {
+  final amountCtrl = TextEditingController();
+  final noteCtrl = TextEditingController();
+  var selectedHint = _payInNoteHints.first;
+
+  if (!context.mounted) return;
+
+  final ok = await showAppDialog<bool>(
+    context: context,
+    title: 'Kassaya nağd əlavə',
+    subtitle: 'Sahibkar və ya kassaya daxil olan əlavə pul',
+    icon: Icons.add_circle_outline,
+    maxWidth: 480,
+    body: StatefulBuilder(
+      builder: (ctx, setDlg) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TextField(
+            controller: amountCtrl,
+            autofocus: true,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}'))],
+            decoration: const InputDecoration(labelText: 'Məbləğ (AZN)'),
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          Text('Səbəb', style: Theme.of(ctx).textTheme.bodySmall),
+          const SizedBox(height: AppSpacing.sm),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: _payInNoteHints.map((hint) {
+              final selected = selectedHint == hint;
+              return ChoiceChip(
+                label: Text(hint, style: const TextStyle(fontSize: 12)),
+                selected: selected,
+                onSelected: (_) => setDlg(() {
+                  selectedHint = hint;
+                  if (noteCtrl.text.isEmpty || _payInNoteHints.contains(noteCtrl.text.trim())) {
+                    noteCtrl.text = hint == 'Digər' ? '' : hint;
+                  }
+                }),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          TextField(
+            controller: noteCtrl,
+            maxLines: 2,
+            decoration: const InputDecoration(
+              labelText: 'Qeyd',
+              hintText: 'Məs: Sahibkar Əli verdi — dəyişiklik üçün',
+            ),
+          ),
+        ],
+      ),
+    ),
+    actions: [
+      OutlinedButton(onPressed: () => Navigator.pop(context, false), child: const Text('Ləğv')),
+      FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Kassaya əlavə et')),
+    ],
+  );
+
+  if (ok != true || !context.mounted) return;
+  final amount = double.tryParse(amountCtrl.text.replaceAll(',', '.')) ?? 0;
+  if (amount <= 0) {
+    showAppSnackBar(context, 'Məbləğ düzgün deyil', isError: true);
+    return;
+  }
+
+  final note = noteCtrl.text.trim();
+  if (note.isEmpty) {
+    showAppSnackBar(context, 'Zəhmət olmasa qeyd yazın (kim verdi, nə üçün)', isError: true);
+    return;
+  }
+
+  try {
+    await ref.read(posServiceProvider).addShiftMovement(
+      shiftId,
+      type: 'pay_in',
+      amount: amount,
+      description: note,
+    );
+    ref.invalidate(currentShiftProvider);
+    if (context.mounted) showAppSnackBar(context, 'Kassaya $amount AZN əlavə edildi');
+  } catch (e) {
+    if (context.mounted) showAppSnackBar(context, e.toString(), isError: true);
+  }
+}
+
+/// Kassadan çıxarış — xərc və ya sahibkarə.
+Future<void> showCashOutDialog(BuildContext context, WidgetRef ref, int shiftId) async {
   final cats = await ref.read(shiftCategoriesProvider.future);
   final expenseCats = (cats['expense_categories'] as Map<String, dynamic>?) ?? {};
 
@@ -57,9 +155,9 @@ Future<void> showCashMovementDialog(BuildContext context, WidgetRef ref, int shi
 
   final ok = await showAppDialog<bool>(
     context: context,
-    title: 'Kassadan çıxarış / əlavə',
-    subtitle: 'Xərc, sahibkarə verilmə və ya kassaya əlavə',
-    icon: Icons.payments_outlined,
+    title: 'Kassadan pul çıxar',
+    subtitle: 'Xərc və ya sahibkarə verilmə',
+    icon: Icons.remove_circle_outline,
     maxWidth: 480,
     body: StatefulBuilder(
       builder: (ctx, setDlg) => Column(
@@ -68,8 +166,7 @@ Future<void> showCashMovementDialog(BuildContext context, WidgetRef ref, int shi
           SegmentedButton<String>(
             segments: const [
               ButtonSegment(value: 'expense', label: Text('Xərc')),
-              ButtonSegment(value: 'owner_withdrawal', label: Text('Sahibkar')),
-              ButtonSegment(value: 'pay_in', label: Text('Əlavə')),
+              ButtonSegment(value: 'owner_withdrawal', label: Text('Sahibkarə')),
             ],
             selected: {type},
             onSelectionChanged: (s) => setDlg(() => type = s.first),
@@ -77,14 +174,14 @@ Future<void> showCashMovementDialog(BuildContext context, WidgetRef ref, int shi
           const SizedBox(height: AppSpacing.lg),
           if (type == 'expense')
             DropdownButtonFormField<String>(
-              decoration: const InputDecoration(labelText: 'Kateqoriya'),
+              decoration: const InputDecoration(labelText: 'Xərc növü'),
               value: category,
               items: expenseCats.entries
                   .map((e) => DropdownMenuItem(value: e.key, child: Text(e.value.toString())))
                   .toList(),
               onChanged: (v) => setDlg(() => category = v ?? category),
             ),
-          if (type != 'expense') const SizedBox(height: 0) else const SizedBox(height: AppSpacing.lg),
+          if (type == 'expense') const SizedBox(height: AppSpacing.lg),
           TextField(
             controller: amountCtrl,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -95,7 +192,10 @@ Future<void> showCashMovementDialog(BuildContext context, WidgetRef ref, int shi
           TextField(
             controller: noteCtrl,
             maxLines: 2,
-            decoration: const InputDecoration(labelText: 'Qeyd (istəyə bağlı)'),
+            decoration: InputDecoration(
+              labelText: 'Qeyd',
+              hintText: type == 'owner_withdrawal' ? 'Məs: Sahibkarə günün gəliri' : 'Məs: Çay, təmizlik materialları',
+            ),
           ),
         ],
       ),

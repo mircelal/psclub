@@ -11,14 +11,16 @@ class ShiftRailCard extends StatelessWidget {
     required this.biz,
     required this.shift,
     required this.onOpenShift,
-    required this.onCashMovement,
+    this.onCashIn,
+    this.onCashOut,
     required this.onCloseShift,
   });
 
   final BusinessConfig biz;
   final Map<String, dynamic>? shift;
   final VoidCallback onOpenShift;
-  final VoidCallback onCashMovement;
+  final VoidCallback? onCashIn;
+  final VoidCallback? onCashOut;
   final VoidCallback onCloseShift;
 
   @override
@@ -33,14 +35,10 @@ class ShiftRailCard extends StatelessWidget {
       margin: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: isOpen
-            ? CashierTheme.accentSubtle(context)
-            : CashierTheme.surfaceSecondary(context),
+        color: isOpen ? CashierTheme.accentSubtle(context) : CashierTheme.surfaceSecondary(context),
         borderRadius: BorderRadius.circular(CashierTheme.radiusCard),
         border: Border.all(
-          color: isOpen
-              ? CashierTheme.accent(context).withValues(alpha: 0.35)
-              : CashierTheme.border(context),
+          color: isOpen ? CashierTheme.accent(context).withValues(alpha: 0.35) : CashierTheme.border(context),
         ),
       ),
       child: Column(
@@ -80,29 +78,47 @@ class ShiftRailCard extends StatelessWidget {
             Row(
               children: [
                 Expanded(
-                  child: OutlinedButton(
-                    onPressed: onCashMovement,
-                    style: OutlinedButton.styleFrom(
-                      visualDensity: VisualDensity.compact,
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                    ),
-                    child: const Text('Pul çıxar', style: TextStyle(fontSize: 12)),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: FilledButton(
-                    onPressed: onCloseShift,
+                  child: FilledButton.tonalIcon(
+                    onPressed: onCashIn,
+                    icon: const Icon(Icons.add_circle_outline, size: 18),
+                    label: const Text('Nağd əlavə', style: TextStyle(fontSize: 11)),
                     style: FilledButton.styleFrom(
                       visualDensity: VisualDensity.compact,
-                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
                     ),
-                    child: const Text('Bağla', style: TextStyle(fontSize: 12)),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: onCashOut,
+                    style: OutlinedButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+                    ),
+                    child: const Text('Pul çıxar', style: TextStyle(fontSize: 11)),
                   ),
                 ),
               ],
             ),
+            const SizedBox(height: 6),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton(
+                onPressed: onCloseShift,
+                style: OutlinedButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                ),
+                child: const Text('Növbəni bağla', style: TextStyle(fontSize: 12)),
+              ),
+            ),
           ] else ...[
+            const SizedBox(height: 8),
+            Text(
+              'Satış üçün əvvəlcə növbəni açın',
+              style: CashierTheme.caption(context),
+            ),
             const SizedBox(height: 10),
             FilledButton.icon(
               onPressed: onOpenShift,

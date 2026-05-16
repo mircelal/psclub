@@ -6,6 +6,7 @@ import '../../../core/theme/cashier_theme.dart';
 import '../../../core/widgets/app_snackbar.dart';
 import '../../../services/pos_service.dart';
 import '../close_session_dialog.dart';
+import '../shift_guard.dart';
 import 'table_session_state.dart';
 
 /// Masa kartında sağ klik — yalnız cari vəziyyətə uyğun əməliyyatlar.
@@ -95,6 +96,8 @@ Future<void> showTableContextMenu({
   );
 
   if (selected == null || !context.mounted) return;
+
+  if (!await ensureOpenShiftForCashier(context, ref)) return;
 
   switch (selected) {
     case 'open':

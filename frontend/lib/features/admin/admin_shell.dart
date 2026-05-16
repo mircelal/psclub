@@ -87,13 +87,22 @@ class _AdminShellState extends ConsumerState<AdminShell> {
             ? Drawer(
                 width: math.min(width * 0.88, 300.0),
                 backgroundColor: CashierTheme.surfaceSidebar(context),
-                child: _SideNav(index: _index, onSelect: selectPage),
+                child: _SideNav(
+                  index: _index,
+                  onSelect: selectPage,
+                  onCashier: () => context.go('/cashier'),
+                ),
               )
             : null,
         body: Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (wide) _SideNav(index: _index, onSelect: (i) => setState(() => _index = i)),
+            if (wide)
+              _SideNav(
+                index: _index,
+                onSelect: (i) => setState(() => _index = i),
+                onCashier: () => context.go('/cashier'),
+              ),
             Expanded(
               child: Column(
                 children: [
@@ -214,10 +223,15 @@ class _AdminShellState extends ConsumerState<AdminShell> {
 }
 
 class _SideNav extends ConsumerWidget {
-  const _SideNav({required this.index, required this.onSelect});
+  const _SideNav({
+    required this.index,
+    required this.onSelect,
+    required this.onCashier,
+  });
 
   final int index;
   final ValueChanged<int> onSelect;
+  final VoidCallback onCashier;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -316,11 +330,18 @@ class _SideNav extends ConsumerWidget {
             ),
             const Divider(height: 1),
             Padding(
-              padding: const EdgeInsets.all(AppSpacing.md),
-              child: Text(
-                'Kassir panelinə keçid üçün yuxarıdakı düymə',
-                style: CashierTheme.caption(context),
-                textAlign: TextAlign.center,
+              padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.md, AppSpacing.lg, AppSpacing.lg),
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton.tonalIcon(
+                  onPressed: onCashier,
+                  icon: const Icon(Icons.point_of_sale_outlined, size: 20),
+                  label: const Text('Kassir paneli'),
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 12, 10),
+                    alignment: Alignment.centerLeft,
+                  ),
+                ),
               ),
             ),
           ],
@@ -391,14 +412,18 @@ class _AdminTopBar extends StatelessWidget {
               IconButton(
                 onPressed: onCashier,
                 icon: const Icon(Icons.point_of_sale_outlined, size: 22),
-                tooltip: 'Kassir',
+                tooltip: 'Kassir paneli',
                 color: BrandColors.brightBlue,
               )
             else
-              FilledButton.icon(
+              FilledButton.tonalIcon(
                 onPressed: onCashier,
-                icon: const Icon(Icons.point_of_sale_outlined, size: 18),
-                label: const Text('Kassir'),
+                icon: const Icon(Icons.point_of_sale_outlined, size: 20),
+                label: const Text('Kassir paneli'),
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  visualDensity: VisualDensity.compact,
+                ),
               ),
             const SizedBox(width: AppSpacing.sm),
             IconButton(

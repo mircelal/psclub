@@ -166,6 +166,11 @@ final class SessionsController
 
     public function setDiscount(Request $request, Response $response, array $args): Response
     {
+        $user = $request->getAttribute('user');
+        if ($denied = ShiftsController::assertCashierHasOpenShift($this->shifts, $user)) {
+            return $denied;
+        }
+
         $sessionId = (int) $args['id'];
         $body = (array) $request->getParsedBody();
         $session = $this->findSession($sessionId);
@@ -196,6 +201,11 @@ final class SessionsController
 
     public function applyCoupon(Request $request, Response $response, array $args): Response
     {
+        $user = $request->getAttribute('user');
+        if ($denied = ShiftsController::assertCashierHasOpenShift($this->shifts, $user)) {
+            return $denied;
+        }
+
         $sessionId = (int) $args['id'];
         $body = (array) $request->getParsedBody();
         if (!v::key('code', v::stringType()->notEmpty())->validate($body)) {
@@ -236,6 +246,11 @@ final class SessionsController
 
     public function clearDiscount(Request $request, Response $response, array $args): Response
     {
+        $user = $request->getAttribute('user');
+        if ($denied = ShiftsController::assertCashierHasOpenShift($this->shifts, $user)) {
+            return $denied;
+        }
+
         $sessionId = (int) $args['id'];
         $session = $this->findSession($sessionId);
         if (!$session || !in_array($session['status'], ['active', 'paused'], true)) {
@@ -254,6 +269,9 @@ final class SessionsController
         $sessionId = (int) $args['id'];
         $body = (array) $request->getParsedBody();
         $user = $request->getAttribute('user');
+        if ($denied = ShiftsController::assertCashierHasOpenShift($this->shifts, $user)) {
+            return $denied;
+        }
 
         if (!v::key('product_id', v::intVal())->key('quantity', v::intVal()->positive())->validate($body)) {
             return ApiResponse::error('Validation failed', 422);
@@ -309,6 +327,9 @@ final class SessionsController
         $itemId = (int) $args['itemId'];
         $body = (array) $request->getParsedBody();
         $user = $request->getAttribute('user');
+        if ($denied = ShiftsController::assertCashierHasOpenShift($this->shifts, $user)) {
+            return $denied;
+        }
 
         if (!v::key('quantity', v::intVal())->validate($body)) {
             return ApiResponse::error('Validation failed', 422);
@@ -362,6 +383,10 @@ final class SessionsController
         $sessionId = (int) $args['id'];
         $itemId = (int) $args['itemId'];
         $user = $request->getAttribute('user');
+        if ($denied = ShiftsController::assertCashierHasOpenShift($this->shifts, $user)) {
+            return $denied;
+        }
+
         $session = $this->findSession($sessionId);
         if (!$session || !in_array($session['status'], ['active', 'paused'], true)) {
             return ApiResponse::error('Session not active', 400);
@@ -393,16 +418,21 @@ final class SessionsController
 
     public function pause(Request $request, Response $response, array $args): Response
     {
-        return $this->togglePause((int) $args['id'], true);
+        return $this->togglePause($request, (int) $args['id'], true);
     }
 
     public function resume(Request $request, Response $response, array $args): Response
     {
-        return $this->togglePause((int) $args['id'], false);
+        return $this->togglePause($request, (int) $args['id'], false);
     }
 
-    private function togglePause(int $sessionId, bool $pause): Response
+    private function togglePause(Request $request, int $sessionId, bool $pause): Response
     {
+        $user = $request->getAttribute('user');
+        if ($denied = ShiftsController::assertCashierHasOpenShift($this->shifts, $user)) {
+            return $denied;
+        }
+
         $session = $this->findSession($sessionId);
         if (!$session) {
             return ApiResponse::error('Session not found', 404);

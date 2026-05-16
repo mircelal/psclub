@@ -27,7 +27,8 @@ class CashierSideRail extends StatelessWidget {
     this.onAdmin,
     this.shift,
     this.onOpenShift,
-    this.onCashMovement,
+    this.onCashIn,
+    this.onCashOut,
     this.onCloseShift,
   });
 
@@ -47,7 +48,8 @@ class CashierSideRail extends StatelessWidget {
   final VoidCallback? onAdmin;
   final Map<String, dynamic>? shift;
   final VoidCallback? onOpenShift;
-  final VoidCallback? onCashMovement;
+  final VoidCallback? onCashIn;
+  final VoidCallback? onCashOut;
   final VoidCallback? onCloseShift;
 
   /// Drawer içində — eni parent-ə uyğun.
@@ -103,7 +105,8 @@ class CashierSideRail extends StatelessWidget {
                         biz: biz,
                         shift: shift,
                         onOpenShift: onOpenShift!,
-                        onCashMovement: onCashMovement ?? () {},
+                        onCashIn: onCashIn,
+                        onCashOut: onCashOut,
                         onCloseShift: onCloseShift ?? () {},
                       ),
                     ],
