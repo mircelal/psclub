@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../core/billing/billing_calculator.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/table_status_theme.dart';
 
 class TimerDisplay extends StatelessWidget {
   const TimerDisplay({
@@ -24,7 +25,8 @@ class TimerDisplay extends StatelessWidget {
   final bool isUrgent;
   final Color? color;
 
-  int get _tick => tick ?? DateTime.now().second;
+  /// Kolon yanıb-sönməsi — hər saniyə (valideyn tick-dən asılı deyil).
+  int get _tick => DateTime.now().second;
 
   @override
   Widget build(BuildContext context) {
@@ -44,22 +46,29 @@ class TimerDisplay extends StatelessWidget {
 
     if (bill.isCountdown && bill.remainingSeconds != null) {
       if (isExpired) {
+        final expiredColor = color ??
+            (Theme.of(context).brightness == Brightness.light
+                ? SessionStatusColors.expiredAccentLight
+                : SessionStatusColors.expiredLabelDark);
         return Text(
           'Vaxt bitdi',
           style: TextStyle(
-            fontWeight: FontWeight.w600,
+            fontWeight: FontWeight.w700,
             fontSize: size + 1,
-            color: AppColors.tableActive,
+            color: expiredColor,
             letterSpacing: 0,
             fontFeatures: const [FontFeature.tabularFigures()],
           ),
         );
       }
+      final urgentColor = Theme.of(context).brightness == Brightness.light
+          ? AppColors.tablePaused
+          : const Color(0xFFE8B86D);
       return _AnimatedClock(
         totalSeconds: bill.remainingSeconds!,
         tick: _tick,
         fontSize: size,
-        color: isUrgent ? AppColors.tablePaused : AppColors.tablePaused.withValues(alpha: 0.95),
+        color: isUrgent ? urgentColor : (color ?? urgentColor.withValues(alpha: 0.9)),
         urgent: isUrgent,
       );
     }

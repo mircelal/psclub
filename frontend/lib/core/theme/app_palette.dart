@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'brand_colors.dart';
 import 'cashier_theme.dart';
 
 class AppPalette {
@@ -35,8 +36,8 @@ class AppPalette {
     borderLight: CashierTheme.darkBorderStrong,
     textPrimary: CashierTheme.darkTextPrimary,
     textSecondary: CashierTheme.darkTextSecondary,
-    textMuted: Color(0xFF7A94B8),
-    primarySoft: Color(0x2E2463E7),
+    textMuted: DarkNeutral.textLow,
+    primarySoft: Color(0x332463E7),
   );
 
   static const _light = AppPalette(

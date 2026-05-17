@@ -94,7 +94,7 @@ class _TableListTileState extends ConsumerState<TableListTile> with SingleTicker
 
     var cardStyle = context.tableStatusStyle(status, hasSession: hasSession);
     if (isExpired) {
-      cardStyle = TableStatusTheme.expiredOverlay(cardStyle, _blink.value);
+      cardStyle = TableStatusTheme.expiredOverlay(context, cardStyle, _blink.value);
     }
 
     return Material(

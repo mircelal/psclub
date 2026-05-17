@@ -26,6 +26,11 @@ use Slim\App;
 use Slim\Routing\RouteCollectorProxy;
 
 return function (App $app): void {
+    // Brauzer preflight (OPTIONS) — routing 405 verməsin
+    $app->options('/api/{routes:.+}', function ($request, $response) {
+        return $response->withStatus(204);
+    });
+
     $app->get('/api/health', function ($request, $response) {
         $response->getBody()->write(json_encode(['status' => 'ok', 'time' => date('c')]));
         return $response->withHeader('Content-Type', 'application/json');

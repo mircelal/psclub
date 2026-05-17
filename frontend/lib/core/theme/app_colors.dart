@@ -6,7 +6,7 @@ abstract final class AppColors {
   static const bg = CashierTheme.darkScaffold;
   static const surface = CashierTheme.darkSurfaceSidebar;
   static const surfaceElevated = CashierTheme.darkSurfaceRaised;
-  static const surfaceHover = Color(0xFF0D3578);
+  static const surfaceHover = Color(0xFF383838);
   static const border = CashierTheme.darkBorder;
   static const borderLight = CashierTheme.darkBorderStrong;
 
@@ -29,7 +29,7 @@ abstract final class AppColors {
 
   /// Masa statusu — premium venue POS (sakit, göz yormayan, yüksək kontrastlı deyil).
   static const tableEmpty = Color(0xFF6B9080);
-  static const tableActive = Color(0xFFCF6B6B);
+  static const tableActive = Color(0xFFF28B82);
   static const tablePaused = Color(0xFFC4A24D);
   static const tableClosed = Color(0xFF7B8798);
 

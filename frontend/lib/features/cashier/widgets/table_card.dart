@@ -102,7 +102,7 @@ class _TableCardState extends ConsumerState<TableCard> with SingleTickerProvider
 
     var cardStyle = context.tableStatusStyle(status, hasSession: hasSession);
     if (isExpired) {
-      cardStyle = TableStatusTheme.expiredOverlay(cardStyle, _blink.value);
+      cardStyle = TableStatusTheme.expiredOverlay(context, cardStyle, _blink.value);
     }
 
     return Material(

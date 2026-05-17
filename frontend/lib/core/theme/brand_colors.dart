@@ -20,3 +20,16 @@ abstract final class BrandColors {
   static const textOnLight = navy;
   static const textMutedLight = Color(0xFF4A5F7A);
 }
+
+/// Material / Google tipli neytral dark fonlar (mavi ton minimum).
+abstract final class DarkNeutral {
+  static const scaffold = Color(0xFF121212);
+  static const surface1 = Color(0xFF1E1E1E);
+  static const surface2 = Color(0xFF2C2C2C);
+  static const surface3 = Color(0xFF383838);
+  static const border = Color(0xFF3C3C3C);
+  static const borderStrong = Color(0xFF5F6368);
+  static const textHigh = Color(0xFFE8EAED);
+  static const textMedium = Color(0xFF9AA0A6);
+  static const textLow = Color(0xFF80868B);
+}

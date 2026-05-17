@@ -1,16 +1,12 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../config/api_config.dart';
+import 'token_storage.dart';
 
-const _tokenKey = 'jwt_token';
-
-final secureStorageProvider = Provider<FlutterSecureStorage>(
-  (_) => const FlutterSecureStorage(),
-);
+final tokenStorageProvider = Provider<TokenStorage>((_) => TokenStorage.platform());
 
 final apiClientProvider = Provider<ApiClient>((ref) {
-  return ApiClient(ref.read(secureStorageProvider));
+  return ApiClient(ref.read(tokenStorageProvider));
 });
 
 class ApiClient {
@@ -23,7 +19,7 @@ class ApiClient {
     ));
     _dio.interceptors.add(InterceptorsWrapper(
       onRequest: (options, handler) async {
-        final token = await _storage.read(key: _tokenKey);
+        final token = await _storage.read();
         if (token != null && token.isNotEmpty) {
           options.headers['Authorization'] = 'Bearer $token';
         }
@@ -32,14 +28,14 @@ class ApiClient {
     ));
   }
 
-  final FlutterSecureStorage _storage;
+  final TokenStorage _storage;
   late final Dio _dio;
 
   Dio get dio => _dio;
 
-  Future<void> saveToken(String token) => _storage.write(key: _tokenKey, value: token);
-  Future<void> clearToken() => _storage.delete(key: _tokenKey);
-  Future<String?> getToken() => _storage.read(key: _tokenKey);
+  Future<void> saveToken(String token) => _storage.write(token);
+  Future<void> clearToken() => _storage.delete();
+  Future<String?> getToken() => _storage.read();
 
   Future<Map<String, dynamic>> get(String path, {Map<String, dynamic>? query}) async {
     final res = await _dio.get(path, queryParameters: query);
@@ -67,11 +63,8 @@ class ApiClient {
   }
 
   Future<Map<String, dynamic>> postMultipart(String path, FormData data) async {
-    final res = await _dio.post(
-      path,
-      data: data,
-      options: Options(contentType: 'multipart/form-data'),
-    );
+    // contentType verməyin — Dio boundary ilə özü təyin edir.
+    final res = await _dio.post(path, data: data);
     return _unwrap(res);
   }
 
@@ -87,5 +80,23 @@ class ApiClient {
       );
     }
     return body;
+  }
+
+  static String messageFromError(Object error) {
+    if (error is DioException) {
+      final status = error.response?.statusCode;
+      if (status == 401) {
+        return 'Sessiya bitib və ya giriş yoxdur — yenidən daxil olun';
+      }
+      if (status == 403) {
+        return 'Bu əməliyyat üçün admin hüququ lazımdır';
+      }
+      final data = error.response?.data;
+      if (data is Map && data['message'] != null) {
+        return data['message'].toString();
+      }
+      return error.message ?? error.toString();
+    }
+    return error.toString();
   }
 }

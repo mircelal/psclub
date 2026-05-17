@@ -2,9 +2,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/utils/json_parse.dart';
 import '../../services/pos_service.dart';
 
-final currentShiftProvider = FutureProvider.autoDispose<Map<String, dynamic>?>((ref) async {
+/// autoDispose deyil — hər 3 saniyədə yenilənəndə UI yanıb-sönməsin.
+final currentShiftProvider = FutureProvider<Map<String, dynamic>?>((ref) async {
   return ref.read(posServiceProvider).getCurrentShift();
 });
+
+void refreshCurrentShift(WidgetRef ref) {
+  ref.invalidate(currentShiftProvider);
+}
 
 final shiftCategoriesProvider = FutureProvider<Map<String, dynamic>>((ref) async {
   return ref.read(posServiceProvider).getShiftCategories();

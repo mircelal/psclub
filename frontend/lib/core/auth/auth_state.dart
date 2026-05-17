@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api/api_client.dart';
+import '../utils/json_parse.dart';
 
 class AuthUser {
   AuthUser({
@@ -18,7 +19,7 @@ class AuthUser {
 
   factory AuthUser.fromJson(Map<String, dynamic> json) {
     return AuthUser(
-      id: json['id'] as int,
+      id: jsonToInt(json['id']),
       username: json['username'] as String,
       role: json['role'] as String,
       fullName: json['full_name'] as String?,

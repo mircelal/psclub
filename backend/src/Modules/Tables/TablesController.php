@@ -90,6 +90,11 @@ final class TablesController
             $pauseRows
         );
 
+        $plannedMinutes = isset($tableRow['planned_minutes']) ? (int) $tableRow['planned_minutes'] : 0;
+        if ($plannedMinutes > 0) {
+            $activeSeconds = min($activeSeconds, $plannedMinutes * 60);
+        }
+
         $setPrice = (float) ($tableRow['session_set_price'] ?? 0);
         if ($setPrice > 0) {
             $timeCharge = round($setPrice, 2);
@@ -108,7 +113,6 @@ final class TablesController
             $productsTotal = $this->billing->calculateProductsTotal($items);
         }
         $total = round($timeCharge + $productsTotal, 2);
-        $plannedMinutes = isset($tableRow['planned_minutes']) ? (int) $tableRow['planned_minutes'] : 0;
 
         $itemRows = array_map(static fn (array $i): array => [
             'product_name' => $i['product_name'],

@@ -39,7 +39,7 @@ abstract final class CashierThemeData {
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: isLight ? Colors.white : BrandColors.navyMid,
+        fillColor: isLight ? Colors.white : DarkNeutral.surface2,
         labelStyle: CashierTypography.ui(size: 13, color: scheme.onSurfaceVariant, weight: FontWeight.w500),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
@@ -51,7 +51,7 @@ abstract final class CashierThemeData {
         ),
       ),
       chipTheme: ChipThemeData(
-        backgroundColor: isLight ? BrandColors.skyPale : BrandColors.navyMid,
+        backgroundColor: isLight ? BrandColors.skyPale : DarkNeutral.surface2,
         selectedColor: BrandColors.brightBlue.withValues(alpha: 0.2),
         labelStyle: CashierTypography.ui(size: 13, color: scheme.onSurface, weight: FontWeight.w500),
         side: BorderSide(color: scheme.outline.withValues(alpha: 0.6)),
@@ -75,12 +75,12 @@ abstract final class CashierThemeData {
   static final _darkScheme = ColorScheme.dark(
     primary: BrandColors.brightBlue,
     onPrimary: Colors.white,
-    secondary: BrandColors.sky,
-    onSecondary: BrandColors.navy,
-    surface: BrandColors.navyDark,
-    onSurface: BrandColors.textOnNavy,
-    surfaceContainerHighest: BrandColors.navyMid,
-    onSurfaceVariant: const Color(0xFF8EB4E8),
-    outline: BrandColors.navyMid,
+    secondary: const Color(0xFF8AB4F8),
+    onSecondary: DarkNeutral.textHigh,
+    surface: DarkNeutral.surface1,
+    onSurface: DarkNeutral.textHigh,
+    surfaceContainerHighest: DarkNeutral.surface2,
+    onSurfaceVariant: DarkNeutral.textMedium,
+    outline: DarkNeutral.border,
   );
 }

@@ -1,3 +1,6 @@
+/dist/
+/scripts/deploy-config.local.ps1
+/backend/database/install.sql
 /backend/vendor/
 /backend/.env
 /backend/storage/logs/*.log

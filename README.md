@@ -29,17 +29,32 @@ PlayStation klubu üçün hibrid POS: saatlıq icarə + məhsul satışı.
    - Admin: `admin` / `admin`
    - Kassir: `kassir` / `kassir`
 
-5. Flutter:
-   ```bash
+5. Flutter (Windows):
+   ```powershell
+   # Uzaq server (psapi.sayt.cam) — tövsiyə
+   powershell -File .\scripts\run-windows.ps1
+
+   # Lokal backend (Laragon)
+   powershell -File .\scripts\run-windows-local.ps1
+
+   # Əl ilə:
    cd frontend
    flutter pub get
-   dart run flutter_launcher_icons   # tətbiq ikonu (assets/icons/)
-   flutter run -d windows
+   flutter run -d windows --dart-define-from-file=dart_defines.remote.json
    ```
 
    **Qeyd:** Windows ikonu dəyişdikdən sonra tam rebuild lazımdır (`flutter run` dayandırıb yenidən başladın).
 
 API əsas URL (Flutter): `http://psclub.test/api` və ya `http://127.0.0.1/psclub/backend/public/api`
+
+## DirectAdmin deploy (zip)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build-deploy.ps1
+```
+
+Çıxış: `dist/psapi-backend.zip` və `dist/ps-frontend.zip` — `OXU-BUNU.txt` içində upload addımları.
+Skriptdə server DB və domainlər dəyişdirilə bilər (`scripts/build-deploy.ps1` başı).
 
 ## API modulları
 

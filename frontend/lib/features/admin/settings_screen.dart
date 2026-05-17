@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/about/app_about.dart';
@@ -14,6 +15,8 @@ import '../../core/settings/ui_settings_sheet.dart';
 import '../../core/theme/app_palette.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/widgets/app_snackbar.dart';
+import '../../core/api/api_client.dart';
+import '../../core/utils/multipart_file_helper.dart';
 import '../../core/widgets/business_logo.dart';
 import '../../services/pos_service.dart';
 import 'widgets/admin_page_layout.dart';
@@ -36,6 +39,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   final _footerCtrl = TextEditingController();
   String? _logoUrl;
   String? _localLogoPath;
+  Uint8List? _localLogoBytes;
   bool _loading = true;
   bool _saving = false;
 
@@ -56,7 +60,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    _data = await ref.read(posServiceProvider).getSettings();
+    try {
+      _data = await ref.read(posServiceProvider).getSettings();
+    } catch (e) {
+      if (mounted) {
+        setState(() => _loading = false);
+        showAppSnackBar(context, ApiClient.messageFromError(e), isError: true);
+      }
+      return;
+    }
     final biz = _data!['business'] as Map<String, dynamic>;
     _nameCtrl.text = biz['name']?.toString() ?? '';
     _taglineCtrl.text = biz['tagline']?.toString() ?? '';
@@ -66,6 +78,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _timeBillingEnabled = tb == null || tb == true || tb == 1 || tb == '1';
     _logoUrl = MediaUrl.resolve(biz['logo_url']?.toString());
     _localLogoPath = null;
+    _localLogoBytes = null;
     final settings = _data!['settings'] as Map<String, dynamic>? ?? {};
     _headerCtrl.text = settings['receipt_header']?.toString() ?? _nameCtrl.text;
     _footerCtrl.text = settings['receipt_footer']?.toString() ?? '';
@@ -73,27 +86,54 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _pickLogo() async {
-    final result = await FilePicker.platform.pickFiles(type: FileType.image, withData: false);
-    if (result == null || result.files.single.path == null) return;
-    final path = result.files.single.path!;
-    setState(() => _localLogoPath = path);
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+      withData: kIsWeb,
+      allowMultiple: false,
+    );
+    if (result == null || result.files.isEmpty) return;
+
+    final file = result.files.single;
+    final multipart = await multipartFromPlatformFile(file, fallbackName: 'logo.png');
+    if (multipart == null) {
+      if (mounted) {
+        showAppSnackBar(context, 'Şəkil oxunmadı — başqa fayl seçin', isError: true);
+      }
+      return;
+    }
+
+    setState(() {
+      _localLogoPath = kIsWeb ? null : file.path;
+      _localLogoBytes = file.bytes;
+    });
+
     try {
-      final url = await ref.read(posServiceProvider).uploadBusinessLogo(path);
+      final url = await ref.read(posServiceProvider).uploadBusinessLogoMultipart(multipart);
       setState(() {
         _logoUrl = MediaUrl.resolve(url);
         _localLogoPath = null;
+        _localLogoBytes = null;
       });
       ref.invalidate(businessConfigProvider);
       if (mounted) showAppSnackBar(context, 'Logo yükləndi');
     } catch (e) {
       if (mounted) {
-        setState(() => _localLogoPath = null);
-        showAppSnackBar(context, e.toString(), isError: true);
+        setState(() {
+          _localLogoPath = null;
+          _localLogoBytes = null;
+        });
+        showAppSnackBar(context, ApiClient.messageFromError(e), isError: true);
       }
     }
   }
 
   Widget _logoPreview() {
+    if (_localLogoBytes != null) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        child: Image.memory(_localLogoBytes!, width: 72, height: 72, fit: BoxFit.cover),
+      );
+    }
     if (_localLogoPath != null) {
       return ClipRRect(
         borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
@@ -118,7 +158,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   Future<void> _save() async {
     setState(() => _saving = true);
-    await ref.read(posServiceProvider).updateSettings({
+    try {
+      await ref.read(posServiceProvider).updateSettings({
       'business': {
         'name': _nameCtrl.text.trim(),
         'tagline': _taglineCtrl.text.trim(),
@@ -131,10 +172,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         'receipt_header': _headerCtrl.text.trim().isEmpty ? _nameCtrl.text.trim() : _headerCtrl.text.trim(),
         'receipt_footer': _footerCtrl.text.trim(),
       },
-    });
-    ref.invalidate(businessConfigProvider);
-    setState(() => _saving = false);
-    if (mounted) showAppSnackBar(context, 'Parametrlər saxlanıldı');
+      });
+      ref.invalidate(businessConfigProvider);
+      if (mounted) showAppSnackBar(context, 'Parametrlər saxlanıldı');
+    } catch (e) {
+      if (mounted) showAppSnackBar(context, ApiClient.messageFromError(e), isError: true);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   @override

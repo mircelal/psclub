@@ -28,9 +28,16 @@ final class CorsMiddleware implements MiddlewareInterface
 
     private function withCors(ResponseInterface $response, string $origin): ResponseInterface
     {
+        $requestOrigin = $_SERVER['HTTP_ORIGIN'] ?? '';
+        $allowed = $origin === '*' ? '*' : $origin;
+        if ($allowed !== '*' && $requestOrigin !== '' && $requestOrigin === $origin) {
+            $allowed = $requestOrigin;
+        }
+
         return $response
-            ->withHeader('Access-Control-Allow-Origin', $origin)
-            ->withHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-            ->withHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+            ->withHeader('Access-Control-Allow-Origin', $allowed)
+            ->withHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept')
+            ->withHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
+            ->withHeader('Access-Control-Max-Age', '86400');
     }
 }

@@ -31,18 +31,19 @@ abstract final class CashierTheme {
   static const lightAccent = BrandColors.brightBlue;
   static const lightAccentSubtle = Color(0x1A2463E7);
 
-  // ── Dark (tünd mavi əsaslı) ───────────────────────────────────────────
-  static const darkScaffold = BrandColors.navyDark;
-  static const darkSurfaceSidebar = BrandColors.navy;
-  static const darkSurfaceMain = Color(0xFF001A47);
-  static const darkSurfaceCanvas = BrandColors.navyMid;
-  static const darkSurfaceTopBar = BrandColors.navy;
-  static const darkSurfaceRaised = Color(0xFF0D3578);
-  static const darkSurfaceSecondary = Color(0xFF0A2860);
-  static const darkBorder = Color(0xFF1A4488);
-  static const darkBorderStrong = Color(0xFF2463A8);
-  static const darkTextPrimary = BrandColors.textOnNavy;
-  static const darkTextSecondary = Color(0xFFA8C4E8);
+  // ── Dark (neytral qara-boz — Google / Material 3) ─────────────────────
+  static const darkScaffold = DarkNeutral.scaffold;
+  static const darkSurfaceSidebar = DarkNeutral.surface1;
+  static const darkSurfaceMain = DarkNeutral.scaffold;
+  static const darkSurfaceCanvas = Color(0xFF1A1A1A);
+  static const darkSurfaceTopBar = DarkNeutral.surface1;
+  static const darkSurfaceRaised = DarkNeutral.surface2;
+  static const darkSurfaceSecondary = Color(0xFF252525);
+  static const darkBorder = DarkNeutral.border;
+  static const darkBorderStrong = DarkNeutral.borderStrong;
+  static const darkTextPrimary = DarkNeutral.textHigh;
+  static const darkTextSecondary = DarkNeutral.textMedium;
+  static const darkTextTertiary = DarkNeutral.textLow;
   static const darkAccent = BrandColors.brightBlue;
 
   // Status — brendə uyğun, oxunaqlı
@@ -84,7 +85,9 @@ abstract final class CashierTheme {
       isLight(context) ? lightAccent : darkAccent;
 
   static Color accentSubtle(BuildContext context) =>
-      accent(context).withValues(alpha: isLight(context) ? 0.10 : 0.18);
+      isLight(context)
+          ? lightAccent.withValues(alpha: 0.10)
+          : BrandColors.brightBlue.withValues(alpha: 0.14);
 
   static Color textPrimary(BuildContext context) =>
       isLight(context) ? lightTextPrimary : darkTextPrimary;
@@ -93,7 +96,7 @@ abstract final class CashierTheme {
       isLight(context) ? lightTextSecondary : darkTextSecondary;
 
   static Color textTertiary(BuildContext context) =>
-      isLight(context) ? lightTextTertiary : const Color(0xFF7A94B8);
+      isLight(context) ? lightTextTertiary : darkTextTertiary;
 
   static List<BoxShadow> cardShadow(BuildContext context) => isLight(context)
       ? [
@@ -105,9 +108,9 @@ abstract final class CashierTheme {
         ]
       : [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.35),
-            blurRadius: 12,
-            offset: const Offset(0, 3),
+            color: Colors.black.withValues(alpha: 0.45),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
           ),
         ];
 
@@ -187,7 +190,7 @@ abstract final class CashierTheme {
 
   static TextStyle sectionTitle(BuildContext context) => CashierTypography.label(
         size: 11,
-        color: isLight(context) ? BrandColors.brightBlue : BrandColors.sky,
+        color: isLight(context) ? BrandColors.brightBlue : darkTextSecondary,
         weight: FontWeight.w600,
         letterSpacing: 0.6,
       );

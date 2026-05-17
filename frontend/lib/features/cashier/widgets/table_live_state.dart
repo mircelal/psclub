@@ -22,6 +22,24 @@ class TableLiveSnapshot {
   final bool isUrgent;
 }
 
+/// Kassir panelindəki «canlı gəlir» — masa kartı ilə eyni məntiq (vaxt bitəndə artmır).
+double tableLiveBillTotal(
+  Map<String, dynamic> table, {
+  String billingMode = 'per_minute',
+  bool timeBillingEnabled = true,
+}) {
+  final snap = computeTableLive(
+    table,
+    billingMode: billingMode,
+    timeBillingEnabled: timeBillingEnabled,
+  );
+  if (snap != null) return snap.bill.totalAmount;
+
+  final preview = table['bill_preview'] as Map<String, dynamic>?;
+  if (preview == null) return 0;
+  return jsonToDouble(preview['total_amount']);
+}
+
 TableLiveSnapshot? computeTableLive(
   Map<String, dynamic> table, {
   String billingMode = 'per_minute',
@@ -60,9 +78,18 @@ TableLiveSnapshot? computeTableLive(
     return TableLiveSnapshot(bill: base, items: items, isExpired: false, isUrgent: false);
   }
 
-  var activeSeconds = DateTime.now().difference(opened).inSeconds;
-  if (base.plannedMinutes != null && base.plannedMinutes! > 0) {
-    activeSeconds = activeSeconds.clamp(0, base.plannedMinutes! * 60);
+  final now = DateTime.now();
+  final int? plannedSecs =
+      base.plannedMinutes != null && base.plannedMinutes! > 0 ? base.plannedMinutes! * 60 : null;
+
+  int activeSeconds;
+  int? remaining;
+  if (plannedSecs != null) {
+    final endAt = opened.add(Duration(seconds: plannedSecs));
+    remaining = endAt.difference(now).inSeconds.clamp(0, plannedSecs);
+    activeSeconds = plannedSecs - remaining;
+  } else {
+    activeSeconds = now.difference(opened).inSeconds;
   }
 
   final rate = jsonToDouble(table['session_hourly_rate'] ?? table['hourly_rate']);
@@ -74,9 +101,6 @@ TableLiveSnapshot? computeTableLive(
         )
       : 0.0;
   final products = base.productsTotal;
-  final remaining = base.plannedMinutes != null && base.plannedMinutes! > 0
-      ? (base.plannedMinutes! * 60 - activeSeconds).clamp(0, base.plannedMinutes! * 60)
-      : null;
 
   final bill = BillingPreview(
     activeSeconds: activeSeconds,

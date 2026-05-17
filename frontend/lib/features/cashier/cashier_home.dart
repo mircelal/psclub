@@ -25,14 +25,12 @@ import 'widgets/open_table_dialog.dart';
 import 'widgets/table_context_menu.dart';
 import 'widgets/table_session_state.dart';
 import 'cashier_shortcuts.dart';
+import 'widgets/table_live_state.dart';
 import 'widgets/tables_layout.dart';
+import 'tables_provider.dart';
 import 'shift_provider.dart';
 import 'shift_dialogs.dart';
 import 'shift_guard.dart';
-
-final tablesProvider = FutureProvider.autoDispose<List<dynamic>>((ref) async {
-  return ref.read(posServiceProvider).getTables();
-});
 
 class CashierHome extends ConsumerStatefulWidget {
   const CashierHome({super.key});
@@ -57,8 +55,7 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
       _maybePromptOpenShift();
     });
     _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) {
-      ref.invalidate(tablesProvider);
-      ref.invalidate(currentShiftProvider);
+      ref.read(tablesProvider.notifier).refresh();
     });
     _tickTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _tick++);
@@ -94,7 +91,7 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
   }
 
   void _onSessionChanged() {
-    ref.invalidate(tablesProvider);
+    ref.read(tablesProvider.notifier).refresh();
   }
 
   Future<void> _showSession(int sessionId) async {
@@ -149,8 +146,8 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
   }
 
   void _refresh() {
-    ref.invalidate(tablesProvider);
-    ref.invalidate(currentShiftProvider);
+    ref.read(tablesProvider.notifier).refresh();
+    refreshCurrentShift(ref);
   }
 
   Future<void> _maybePromptOpenShift() async {
@@ -165,7 +162,8 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
   }
 
   Future<void> _handleOpenShift() async {
-    await showOpenShiftDialog(context, ref);
+    final opened = await showOpenShiftDialog(context, ref);
+    if (opened) refreshCurrentShift(ref);
   }
 
   Future<void> _handleCashIn(Map<String, dynamic> shift) async {
@@ -181,15 +179,43 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
   }
 
   double _liveRevenue(List<Map<String, dynamic>> list) {
+    final biz = ref.read(businessConfigProvider).valueOrNull ?? BusinessConfig.fallback;
     var sum = 0.0;
     for (final t in list) {
       if (t['session_id'] == null) continue;
-      final preview = t['bill_preview'] as Map<String, dynamic>?;
-      if (preview != null) {
-        sum += jsonToDouble(preview['total_amount']);
-      }
+      sum += tableLiveBillTotal(
+        t,
+        billingMode: biz.billingMode,
+        timeBillingEnabled: biz.timeBillingEnabled,
+      );
     }
     return sum;
+  }
+
+  Widget _buildTablesGrid(
+    List<Map<String, dynamic>> all, {
+    required TableViewMode viewMode,
+  }) {
+    final filtered = _applyFilter(all);
+    if (filtered.isEmpty) {
+      return _EmptyFilterState(filter: _filter);
+    }
+    return TablesLayout(
+      tables: filtered,
+      viewMode: viewMode,
+      tick: _tick,
+      onOpen: _openTable,
+      onSession: _showSession,
+      onTableContextMenu: (table, details) => showTableContextMenu(
+        context: context,
+        ref: ref,
+        table: table,
+        globalPosition: details.globalPosition,
+        onOpenTable: _openTable,
+        onOpenSession: _showSession,
+        onChanged: _onSessionChanged,
+      ),
+    );
   }
 
   @override
@@ -198,17 +224,23 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
     final shiftAsync = ref.watch(currentShiftProvider);
     final currentShift = shiftAsync.valueOrNull;
     final tablesAsync = ref.watch(tablesProvider);
+    final tablesList = tablesAsync.valueOrNull;
     final uiSettings = ref.watch(appSettingsProvider).valueOrNull;
     final viewMode = uiSettings?.tableViewMode ?? TableViewMode.grid;
     final biz = ref.watch(businessConfigProvider).valueOrNull ?? BusinessConfig.fallback;
 
-    final list = tablesAsync.valueOrNull?.cast<Map<String, dynamic>>() ?? [];
+    final list = tablesList?.cast<Map<String, dynamic>>() ?? [];
     final active = list.where((t) => t['session_id'] != null).length;
     final empty = list.where((t) => t['session_id'] == null).length;
     final revenue = _liveRevenue(list);
 
     final isAdmin = user?.isAdmin == true;
-    final needsShift = !isAdmin && currentShift == null && !shiftAsync.isLoading;
+    final blockSales = !isAdmin &&
+        shiftAsync.when(
+          data: (shift) => shift == null,
+          loading: () => true,
+          error: (_, __) => true,
+        );
 
     Widget buildSideRail({required bool inDrawer}) {
       return CashierSideRail(
@@ -230,7 +262,11 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
           if (inDrawer) _scaffoldKey.currentState?.closeDrawer();
         },
         onCounterSale: () {
-          _startCounterSale();
+          if (blockSales) {
+            _handleOpenShift();
+          } else {
+            _startCounterSale();
+          }
           if (inDrawer) _scaffoldKey.currentState?.closeDrawer();
         },
         onRefresh: _refresh,
@@ -266,7 +302,7 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
               liveRevenue: revenue,
               activeCount: active,
               totalCount: list.length,
-              onCounterSale: _startCounterSale,
+              onCounterSale: blockSales ? _handleOpenShift : _startCounterSale,
               onShowShortcuts: () => showCashierShortcutsDialog(context, showAdmin: isAdmin),
               onMenuTap: bp.showDrawer ? () => _scaffoldKey.currentState?.openDrawer() : null,
               layout: bp.topBarLayout,
@@ -288,70 +324,47 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
                 horizontalScroll: bp.isMobile,
               ),
             ],
-            if (bp.isDesktop) CounterSaleToolbar(onNewSale: _startCounterSale),
+            if (bp.isDesktop && !blockSales) CounterSaleToolbar(onNewSale: _startCounterSale),
             Expanded(
-              child: Stack(
-                children: [
-                  Padding(
-                    padding: EdgeInsets.fromLTRB(padH, padT, padH, padH),
-                    child: DecoratedBox(
-                      decoration: CashierTheme.contentPanelDecoration(context),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(CashierTheme.radiusCard + 2),
-                        child: tablesAsync.when(
-                          loading: () => Center(
-                            child: SizedBox(
-                              width: 28,
-                              height: 28,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2.5,
-                                color: CashierTheme.accent(context),
-                              ),
-                            ),
-                          ),
-                          error: (e, _) => EmptyState(
-                            icon: Icons.cloud_off_outlined,
-                            title: 'Serverə qoşulmaq olmur',
-                            subtitle: e.toString(),
-                            action: FilledButton.icon(
-                              onPressed: () => ref.invalidate(tablesProvider),
-                              icon: const Icon(Icons.refresh),
-                              label: const Text('Yenidən cəhd et'),
-                            ),
-                          ),
-                          data: (tables) {
-                            final all = tables.cast<Map<String, dynamic>>();
-                            final filtered = _applyFilter(all);
-
-                            if (filtered.isEmpty) {
-                              return _EmptyFilterState(filter: _filter);
-                            }
-
-                            return TablesLayout(
-                              tables: filtered,
-                              viewMode: viewMode,
-                              tick: _tick,
-                              onOpen: _openTable,
-                              onSession: _showSession,
-                              onTableContextMenu: (table, details) => showTableContextMenu(
-                                context: context,
-                                ref: ref,
-                                table: table,
-                                globalPosition: details.globalPosition,
-                                onOpenTable: _openTable,
-                                onOpenSession: _showSession,
-                                onChanged: _onSessionChanged,
-                              ),
-                            );
-                          },
+              child: blockSales
+                  ? _ShiftBlockedWorkspace(onOpenShift: _handleOpenShift)
+                  : Padding(
+                      padding: EdgeInsets.fromLTRB(padH, padT, padH, padH),
+                      child: DecoratedBox(
+                        decoration: CashierTheme.contentPanelDecoration(context),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(CashierTheme.radiusCard + 2),
+                          child: tablesList == null
+                              ? tablesAsync.when(
+                                  loading: () => Center(
+                                    child: SizedBox(
+                                      width: 28,
+                                      height: 28,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2.5,
+                                        color: CashierTheme.accent(context),
+                                      ),
+                                    ),
+                                  ),
+                                  error: (e, _) => EmptyState(
+                                    icon: Icons.cloud_off_outlined,
+                                    title: 'Serverə qoşulmaq olmur',
+                                    subtitle: e.toString(),
+                                    action: FilledButton.icon(
+                                      onPressed: () => ref.read(tablesProvider.notifier).refresh(),
+                                      icon: const Icon(Icons.refresh),
+                                      label: const Text('Yenidən cəhd et'),
+                                    ),
+                                  ),
+                                  data: (_) => const SizedBox.shrink(),
+                                )
+                              : _buildTablesGrid(
+                                  tablesList.cast<Map<String, dynamic>>(),
+                                  viewMode: viewMode,
+                                ),
                         ),
                       ),
                     ),
-                  ),
-                  if (needsShift)
-                    _ShiftRequiredOverlay(onOpenShift: _handleOpenShift),
-                ],
-              ),
             ),
           ],
         ),
@@ -398,41 +411,55 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
   }
 }
 
-class _ShiftRequiredOverlay extends StatelessWidget {
-  const _ShiftRequiredOverlay({required this.onOpenShift});
+/// Növbə açılmayınca masa paneli əvəzinə — arxada heç nə görünmür, yanıb-sönmə yoxdur.
+class _ShiftBlockedWorkspace extends StatelessWidget {
+  const _ShiftBlockedWorkspace({required this.onOpenShift});
 
-  final VoidCallback onOpenShift;
+  final Future<void> Function() onOpenShift;
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: CashierTheme.scaffoldBg(context).withValues(alpha: 0.94),
+    return ColoredBox(
+      color: CashierTheme.surfaceMain(context),
       child: Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 380),
+            constraints: const BoxConstraints(maxWidth: 400),
             child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.lock_outline, size: 52, color: CashierTheme.textTertiary(context)),
-                const SizedBox(height: 20),
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: CashierTheme.surfaceRaised(context),
+                    borderRadius: BorderRadius.circular(CashierTheme.radiusCard),
+                    border: Border.all(color: CashierTheme.border(context)),
+                  ),
+                  child: Icon(Icons.lock_outline, size: 48, color: CashierTheme.accent(context)),
+                ),
+                const SizedBox(height: 24),
                 Text(
-                  'Növbə açılmayıb',
+                  'Əvvəlcə növbəni açın',
                   style: CashierTheme.stationTitle(context, size: 20),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  'Satışa başlamaq üçün əvvəlcə kassadakı nağdı daxil edib günün növbəsini açın.',
+                  'Satış və stansiyalar yalnız növbə açılandan sonra aktiv olur. '
+                  'Sol paneldən kassadakı nağdı daxil edib növbəni açın.',
                   style: CashierTheme.caption(context),
                   textAlign: TextAlign.center,
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 28),
                 FilledButton.icon(
-                  onPressed: onOpenShift,
+                  onPressed: () => onOpenShift(),
                   icon: const Icon(Icons.play_arrow_rounded),
                   label: const Text('Növbəni aç'),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(double.infinity, 48),
+                  ),
                 ),
               ],
             ),

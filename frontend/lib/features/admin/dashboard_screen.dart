@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import '../../core/theme/admin_surface.dart';
 import '../../core/theme/admin_theme.dart';
 import '../../core/theme/brand_colors.dart';
 import '../../core/theme/app_palette.dart';
@@ -122,12 +123,15 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               mainAxisSpacing: AppSpacing.md,
               crossAxisSpacing: AppSpacing.md,
               childAspectRatio: cols == 1 ? 2.8 : 2.2,
-              children: [
-                _periodCard('Bu gün', today, BrandColors.brightBlue),
-                _periodCard('Bu həftə', week, BrandColors.navy),
-                _periodCard('Bu ay', month, AdminTheme.info(context)),
-                _periodCard('Seçilmiş dövr', range, AdminTheme.success(context)),
-              ],
+              children: () {
+                final accents = AdminSurface.dashboardAccents(context);
+                return [
+                  _periodCard('Bu gün', today, accents[0]),
+                  _periodCard('Bu həftə', week, accents[1]),
+                  _periodCard('Bu ay', month, accents[2]),
+                  _periodCard('Seçilmiş dövr', range, accents[3]),
+                ];
+              }(),
             );
           },
         ),
@@ -145,7 +149,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 children: [
                   Text('Masa üzrə gəlir', style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: AppSpacing.md),
-                  _TableRevenueList(tables: tables),
+                  _TableRevenueList(
+                    tables: tables,
+                    rangeTotal: jsonToDouble(range['total_revenue']),
+                  ),
                 ],
               ),
             ),
@@ -185,36 +192,57 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
-  Widget _periodCard(String label, Map<String, dynamic> data, Color color) {
+  Widget _periodCard(String label, Map<String, dynamic> data, Color accent) {
     final total = jsonToDouble(data['total_revenue']);
     final sessions = jsonToInt(data['sessions_count']);
     final timeRev = jsonToDouble(data['time_revenue']);
     final prodRev = jsonToDouble(data['products_revenue']);
+    final discount = jsonToDouble(data['discount_total']);
+    final surface = AdminSurface.periodCard(context, accent);
 
     return Container(
       padding: const EdgeInsets.all(AppSpacing.lg),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.06),
+        color: surface.fill,
         borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-        border: Border.all(color: color.withValues(alpha: 0.2)),
+        border: Border.all(color: surface.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: color)),
-          MoneyText(amount: total, size: MoneySize.large),
-          const SizedBox(height: AppSpacing.xs),
-          Text('$sessions sessiya', style: Theme.of(context).textTheme.bodySmall, maxLines: 1, overflow: TextOverflow.ellipsis),
           Text(
-            'Vaxt: ${timeRev.toStringAsFixed(0)} ₼ • Məhsul: ${prodRev.toStringAsFixed(0)} ₼',
-            style: Theme.of(context).textTheme.bodySmall,
+            label,
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: surface.label),
+          ),
+          MoneyText(amount: total, size: MoneySize.large, color: surface.body),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            '$sessions sessiya',
+            style: TextStyle(fontSize: 12, color: surface.muted),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          Text(
+            _revenueBreakdownLine(timeRev, prodRev, discount),
+            style: TextStyle(fontSize: 11, color: surface.muted, height: 1.35),
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
           ),
         ],
       ),
     );
+  }
+
+  String _revenueBreakdownLine(double timeRev, double prodRev, double discount) {
+    final parts = <String>[
+      'Vaxt: ${timeRev.toStringAsFixed(0)} ₼',
+      'Məhsul: ${prodRev.toStringAsFixed(0)} ₼',
+    ];
+    if (discount > 0.009) {
+      parts.add('Endirim: −${discount.toStringAsFixed(0)} ₼');
+    }
+    return parts.join(' • ');
   }
 
   String _payLabel(String? m) => switch (m) {
@@ -296,15 +324,16 @@ class _DailyChart extends StatelessWidget {
 }
 
 class _TableRevenueList extends StatelessWidget {
-  const _TableRevenueList({required this.tables});
+  const _TableRevenueList({required this.tables, required this.rangeTotal});
 
   final List<dynamic> tables;
+  final double rangeTotal;
 
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
     if (tables.isEmpty) {
-      return Text('Masa gəliri yoxdur', style: TextStyle(color: p.textMuted));
+      return Text('Bu dövrdə bağlanmış masa sessiyası yoxdur', style: TextStyle(color: p.textMuted));
     }
 
     final sorted = [...tables]..sort((a, b) {
@@ -313,53 +342,84 @@ class _TableRevenueList extends StatelessWidget {
         return tb.compareTo(ta);
       });
 
-    return Column(
-      children: sorted.map((raw) {
-        final t = raw as Map<String, dynamic>;
-        final total = jsonToDouble(t['total_revenue']);
-        final sessions = jsonToInt(t['sessions_count']);
-        final timeRev = jsonToDouble(t['time_revenue']);
-        final prodRev = jsonToDouble(t['products_revenue']);
+    final tablesSum = sorted.fold<double>(0, (s, raw) => s + jsonToDouble((raw as Map)['total_revenue']));
 
-        return Container(
-          margin: const EdgeInsets.only(bottom: AppSpacing.sm),
-          padding: const EdgeInsets.all(AppSpacing.lg),
-          decoration: BoxDecoration(
-            color: p.surface,
-            borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-            border: Border.all(color: p.border),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: BrandColors.brightBlue.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ...sorted.map((raw) {
+          final t = raw as Map<String, dynamic>;
+          final total = jsonToDouble(t['total_revenue']);
+          final sessions = jsonToInt(t['sessions_count']);
+          final timeRev = jsonToDouble(t['time_revenue']);
+          final prodRev = jsonToDouble(t['products_revenue']);
+          final discount = jsonToDouble(t['discount_total']);
+          final isCounter = t['is_counter'] == true;
+
+          return Container(
+            margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            decoration: BoxDecoration(
+              color: p.surface,
+              borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+              border: Border.all(color: p.border),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: BrandColors.brightBlue.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+                  ),
+                  child: Icon(
+                    isCounter ? Icons.shopping_bag_outlined : Icons.sports_esports,
+                    size: 20,
+                    color: BrandColors.brightBlue,
+                  ),
                 ),
-                child: Icon(Icons.sports_esports, size: 20, color: BrandColors.brightBlue),
-              ),
-              const SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(t['name'] as String? ?? 'Masa', style: const TextStyle(fontWeight: FontWeight.w600)),
-                    Text(
-                      '$sessions sessiya • Vaxt ${timeRev.toStringAsFixed(0)} ₼ • Məhsul ${prodRev.toStringAsFixed(0)} ₼',
-                      style: TextStyle(fontSize: 11, color: p.textMuted),
-                    ),
-                  ],
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        t['name'] as String? ?? 'Masa',
+                        style: TextStyle(fontWeight: FontWeight.w600, color: p.textPrimary),
+                      ),
+                      Text(
+                        _tableRevenueSubtitle(sessions, timeRev, prodRev, discount),
+                        style: TextStyle(fontSize: 11, color: p.textMuted),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              MoneyText(amount: total, size: MoneySize.small),
-            ],
+                MoneyText(amount: total, size: MoneySize.small),
+              ],
+            ),
+          );
+        }),
+        if (rangeTotal > 0 && (tablesSum - rangeTotal).abs() > 0.02)
+          Padding(
+            padding: const EdgeInsets.only(top: AppSpacing.sm),
+            child: Text(
+              'Qeyd: masa siyahısı cəmi ${tablesSum.toStringAsFixed(2)} ₼ — seçilmiş dövr ümumi gəliri ${rangeTotal.toStringAsFixed(2)} ₼ '
+              '(fərq köhnə və ya düzəldilməmiş sessiyalardan ola bilər).',
+              style: TextStyle(fontSize: 11, color: p.textMuted, height: 1.35),
+            ),
           ),
-        );
-      }).toList(),
+      ],
     );
+  }
+
+  String _tableRevenueSubtitle(int sessions, double timeRev, double prodRev, double discount) {
+    final buf = StringBuffer('$sessions sessiya • Vaxt ${timeRev.toStringAsFixed(0)} ₼ • Məhsul ${prodRev.toStringAsFixed(0)} ₼');
+    if (discount > 0.009) {
+      buf.write(' • Endirim −${discount.toStringAsFixed(0)} ₼');
+    }
+    return buf.toString();
   }
 }
 

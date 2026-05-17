@@ -3,7 +3,7 @@ import 'app_palette.dart';
 import 'brand_colors.dart';
 import 'cashier_theme.dart';
 
-/// Masa kartı — status rəngi hiss olunur, premium pastel.
+/// Masa kartı — status rəngi (light pastel / dark neytral + oxunaqlı qırmızı).
 class TableStatusStyle {
   const TableStatusStyle({
     required this.accent,
@@ -13,6 +13,7 @@ class TableStatusStyle {
     required this.badgeBorder,
     required this.timerZoneFill,
     this.moneyColor,
+    this.badgeTextColor,
     this.cardShadow,
     this.borderWidth = 1,
     this.accentBarWidth = 4,
@@ -25,9 +26,31 @@ class TableStatusStyle {
   final Color badgeBorder;
   final Color timerZoneFill;
   final Color? moneyColor;
+  /// Badge mətni — tünd qırmızı fonda accent çox tünd olanda.
+  final Color? badgeTextColor;
   final List<BoxShadow>? cardShadow;
   final double borderWidth;
   final double accentBarWidth;
+
+  Color badgeLabelColor() => badgeTextColor ?? accent;
+}
+
+/// Sessiya status rəngləri — dark/light ayrıca.
+abstract final class SessionStatusColors {
+  // Light
+  static const activeAccentLight = Color(0xFFC62828);
+  static const activeFillLight = Color(0xFFFFF6F6);
+  static const expiredAccentLight = Color(0xFFB71C1C);
+  static const expiredFillLight = Color(0xFFFFEBEE);
+
+  // Dark — aktiv: oxunaqlı coral; bitmiş: daha tünd qırmızı fon
+  static const activeAccentDark = Color(0xFFF28B82);
+  static const activeFillDark = Color(0xFF2A2224);
+  static const activeBorderDark = Color(0xFF5C3D42);
+  static const expiredAccentDark = Color(0xFF8B2E2E);
+  static const expiredFillDark = Color(0xFF1F1618);
+  static const expiredBorderDark = Color(0xFF6B3035);
+  static const expiredLabelDark = Color(0xFFEF9A9A);
 }
 
 abstract final class TableStatusTheme {
@@ -53,8 +76,8 @@ abstract final class TableStatusTheme {
 
     return switch (status) {
       'active' => TableStatusStyle(
-          accent: CashierTheme.statusActive,
-          cardFill: const Color(0xFFFFF6F6),
+          accent: SessionStatusColors.activeAccentLight,
+          cardFill: SessionStatusColors.activeFillLight,
           cardBorder: const Color(0xFFE8BCBC),
           badgeFill: const Color(0xFFFCEAEA),
           badgeBorder: const Color(0xFFF5D0D0),
@@ -98,64 +121,104 @@ abstract final class TableStatusTheme {
     final shadow = _cardShadow(context);
     return switch (status) {
       'active' => TableStatusStyle(
-          accent: const Color(0xFFE87878),
-          cardFill: Color.lerp(p.surfaceElevated, const Color(0xFFE87878), 0.10)!,
-          cardBorder: const Color(0xFFE87878).withValues(alpha: 0.35),
-          badgeFill: const Color(0xFFE87878).withValues(alpha: 0.14),
-          badgeBorder: const Color(0xFFE87878).withValues(alpha: 0.28),
-          timerZoneFill: const Color(0xFFE87878).withValues(alpha: 0.08),
-          moneyColor: CashierTheme.darkTextPrimary,
+          accent: SessionStatusColors.activeAccentDark,
+          cardFill: SessionStatusColors.activeFillDark,
+          cardBorder: SessionStatusColors.activeBorderDark,
+          badgeFill: const Color(0xFF3A2829),
+          badgeBorder: const Color(0xFF6D4548),
+          timerZoneFill: const Color(0xFF322628),
+          moneyColor: DarkNeutral.textHigh,
+          badgeTextColor: SessionStatusColors.activeAccentDark,
           cardShadow: shadow,
         ),
       'paused' => TableStatusStyle(
-          accent: const Color(0xFFE8A858),
-          cardFill: Color.lerp(p.surfaceElevated, const Color(0xFFE8A858), 0.08)!,
-          cardBorder: const Color(0xFFE8A858).withValues(alpha: 0.32),
-          badgeFill: const Color(0xFFE8A858).withValues(alpha: 0.12),
-          badgeBorder: const Color(0xFFE8A858).withValues(alpha: 0.24),
-          timerZoneFill: const Color(0xFFE8A858).withValues(alpha: 0.07),
-          moneyColor: CashierTheme.darkTextPrimary,
+          accent: const Color(0xFFE8B86D),
+          cardFill: const Color(0xFF2A2722),
+          cardBorder: const Color(0xFF5C4F3A),
+          badgeFill: const Color(0xFF3A3428),
+          badgeBorder: const Color(0xFF6D5F42),
+          timerZoneFill: const Color(0xFF322E26),
+          moneyColor: DarkNeutral.textHigh,
+          badgeTextColor: const Color(0xFFE8B86D),
           cardShadow: shadow,
         ),
       'closed' => TableStatusStyle(
-          accent: CashierTheme.statusClosed,
+          accent: const Color(0xFF9AA0A6),
           cardFill: p.surface,
           cardBorder: CashierTheme.darkBorder,
-          badgeFill: const Color(0xFF9CA3AF).withValues(alpha: 0.12),
-          badgeBorder: const Color(0xFF9CA3AF).withValues(alpha: 0.22),
+          badgeFill: const Color(0xFF2C2C2C),
+          badgeBorder: const Color(0xFF4A4A4A),
           timerZoneFill: p.surface,
+          moneyColor: DarkNeutral.textHigh,
+          badgeTextColor: DarkNeutral.textMedium,
           cardShadow: shadow,
         ),
       _ => TableStatusStyle(
-          accent: BrandColors.brightBlue,
-          cardFill: Color.lerp(p.surfaceElevated, BrandColors.brightBlue, 0.10)!,
-          cardBorder: BrandColors.brightBlue.withValues(alpha: 0.35),
-          badgeFill: BrandColors.brightBlue.withValues(alpha: 0.14),
-          badgeBorder: BrandColors.brightBlue.withValues(alpha: 0.28),
-          timerZoneFill: BrandColors.brightBlue.withValues(alpha: 0.08),
-          moneyColor: CashierTheme.darkTextPrimary,
+          accent: const Color(0xFF8AB4F8),
+          cardFill: Color.lerp(p.surfaceElevated, BrandColors.brightBlue, 0.08)!,
+          cardBorder: const Color(0xFF3D4F66),
+          badgeFill: const Color(0xFF252D38),
+          badgeBorder: const Color(0xFF3D4F66),
+          timerZoneFill: const Color(0xFF222A34),
+          moneyColor: DarkNeutral.textHigh,
+          badgeTextColor: const Color(0xFF8AB4F8),
           cardShadow: shadow,
         ),
     };
   }
 
-  static TableStatusStyle expiredOverlay(TableStatusStyle base, double t) {
-    const pulse = CashierTheme.statusActive;
+  /// Vaxt bitmiş — aktivdən daha tünd qırmızı (dark/light ayrı).
+  static TableStatusStyle expiredOverlay(
+    BuildContext context,
+    TableStatusStyle base,
+    double t,
+  ) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    if (isLight) {
+      const pulse = SessionStatusColors.expiredAccentLight;
+      return TableStatusStyle(
+        accent: Color.lerp(base.accent, pulse, t)!,
+        cardFill: Color.lerp(base.cardFill, SessionStatusColors.expiredFillLight, 0.35 * t)!,
+        cardBorder: Color.lerp(base.cardBorder, pulse, 0.3 * t)!,
+        badgeFill: Color.lerp(base.badgeFill, pulse, 0.15 * t)!,
+        badgeBorder: Color.lerp(base.badgeBorder, pulse, 0.25 * t)!,
+        timerZoneFill: Color.lerp(base.timerZoneFill, const Color(0xFFFDF0F0), 0.3 * t)!,
+        moneyColor: base.moneyColor,
+        badgeTextColor: pulse,
+        borderWidth: 1 + t * 0.5,
+        accentBarWidth: 4 + t,
+        cardShadow: [
+          BoxShadow(
+            color: pulse.withValues(alpha: 0.18 * t),
+            blurRadius: 18,
+            offset: const Offset(0, 4),
+          ),
+          ...(base.cardShadow ?? []),
+        ],
+      );
+    }
+
+    const accent = SessionStatusColors.expiredAccentDark;
+    const fill = SessionStatusColors.expiredFillDark;
+    const border = SessionStatusColors.expiredBorderDark;
+    const label = SessionStatusColors.expiredLabelDark;
+
     return TableStatusStyle(
-      accent: pulse,
-      cardFill: Color.lerp(base.cardFill, const Color(0xFFFFF0F0), 0.35 * t)!,
-      cardBorder: Color.lerp(base.cardBorder, pulse, 0.25 * t)!,
-      badgeFill: Color.lerp(base.badgeFill, pulse, 0.15 * t)!,
-      badgeBorder: Color.lerp(base.badgeBorder, pulse, 0.25 * t)!,
-      timerZoneFill: Color.lerp(base.timerZoneFill, const Color(0xFFFDF0F0), 0.3 * t)!,
-      moneyColor: base.moneyColor,
-      borderWidth: 1,
-      accentBarWidth: 4,
+      accent: Color.lerp(base.accent, accent, 0.5 + 0.5 * t)!,
+      cardFill: Color.lerp(base.cardFill, fill, 0.55 + 0.45 * t)!,
+      cardBorder: Color.lerp(base.cardBorder, border, 0.5 + 0.5 * t)!,
+      badgeFill: Color.lerp(base.badgeFill, const Color(0xFF2A1819), 0.5 + 0.5 * t)!,
+      badgeBorder: Color.lerp(base.badgeBorder, border, 0.5 + 0.5 * t)!,
+      timerZoneFill: Color.lerp(base.timerZoneFill, const Color(0xFF261A1C), 0.5 + 0.5 * t)!,
+      moneyColor: DarkNeutral.textHigh,
+      badgeTextColor: label,
+      borderWidth: 1 + t * 0.5,
+      accentBarWidth: 5,
       cardShadow: [
         BoxShadow(
-          color: pulse.withValues(alpha: 0.16 * t),
-          blurRadius: 18,
-          offset: const Offset(0, 4),
+          color: accent.withValues(alpha: 0.35 * t),
+          blurRadius: 14,
+          offset: const Offset(0, 2),
         ),
         ...(base.cardShadow ?? []),
       ],

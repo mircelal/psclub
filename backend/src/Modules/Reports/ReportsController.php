@@ -28,6 +28,7 @@ final class ReportsController
                     COALESCE(SUM(active_seconds), 0) AS total_seconds,
                     COALESCE(SUM(time_charge), 0) AS time_revenue,
                     COALESCE(SUM(products_total), 0) AS products_revenue,
+                    COALESCE(SUM(discount), 0) AS discount_total,
                     COALESCE(SUM(total_amount), 0) AS total_revenue
              FROM sessions WHERE status = 'closed' AND DATE(closed_at) = ?"
         );
@@ -75,21 +76,7 @@ final class ReportsController
             'range' => $period($from, $to),
         ];
 
-        $tables = $this->pdo->prepare(
-            "SELECT t.id, t.name,
-                    COUNT(s.id) AS sessions_count,
-                    COALESCE(SUM(s.time_charge), 0) AS time_revenue,
-                    COALESCE(SUM(s.products_total), 0) AS products_revenue,
-                    COALESCE(SUM(s.total_amount), 0) AS total_revenue,
-                    COALESCE(SUM(s.active_seconds), 0) AS total_seconds
-             FROM tables t
-             LEFT JOIN sessions s ON s.table_id = t.id
-                AND s.status = 'closed' AND DATE(s.closed_at) BETWEEN ? AND ?
-             WHERE t.is_active = 1
-             GROUP BY t.id, t.name
-             ORDER BY total_revenue DESC"
-        );
-        $tables->execute([$from, $to]);
+        $tables = $this->fetchTableRevenueBreakdown($from, $to);
 
         $daily = $this->pdo->prepare(
             "SELECT DATE(closed_at) AS day,
@@ -134,7 +121,7 @@ final class ReportsController
             'from' => $from,
             'to' => $to,
             'overview' => $overview,
-            'tables' => $tables->fetchAll(),
+            'tables' => $tables,
             'daily_trend' => $daily->fetchAll(),
             'top_products' => $topProducts->fetchAll(),
             'payment_methods' => $payments->fetchAll(),
@@ -150,6 +137,7 @@ final class ReportsController
             "SELECT COUNT(*) AS sessions_count,
                     COALESCE(SUM(time_charge), 0) AS time_revenue,
                     COALESCE(SUM(products_total), 0) AS products_revenue,
+                    COALESCE(SUM(discount), 0) AS discount_total,
                     COALESCE(SUM(total_amount), 0) AS total_revenue,
                     COALESCE(SUM(active_seconds), 0) AS total_seconds
              FROM sessions
@@ -158,6 +146,75 @@ final class ReportsController
         $stmt->execute([$from, $to]);
 
         return $stmt->fetch() ?: [];
+    }
+
+    /**
+     * Masa üzrə gəlir — bağlanmış sessiyalardan (yalnız aktiv masalar deyil).
+     * table_id NULL olan kassa satışları ayrıca sətir kimi qayıdır.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function fetchTableRevenueBreakdown(string $from, string $to): array
+    {
+        $stmt = $this->pdo->prepare(
+            "SELECT s.table_id AS id,
+                    COALESCE(t.name, CONCAT('Masa #', s.table_id)) AS name,
+                    COALESCE(t.is_active, 1) AS table_is_active,
+                    COUNT(s.id) AS sessions_count,
+                    COALESCE(SUM(s.time_charge), 0) AS time_revenue,
+                    COALESCE(SUM(s.products_total), 0) AS products_revenue,
+                    COALESCE(SUM(s.discount), 0) AS discount_total,
+                    COALESCE(SUM(s.total_amount), 0) AS total_revenue,
+                    COALESCE(SUM(s.active_seconds), 0) AS total_seconds
+             FROM sessions s
+             LEFT JOIN tables t ON t.id = s.table_id
+             WHERE s.status = 'closed'
+               AND s.table_id IS NOT NULL
+               AND DATE(s.closed_at) BETWEEN ? AND ?
+             GROUP BY s.table_id, t.name, t.is_active
+             ORDER BY total_revenue DESC"
+        );
+        $stmt->execute([$from, $to]);
+        $rows = $stmt->fetchAll();
+
+        foreach ($rows as &$row) {
+            $row['is_counter'] = false;
+            if (!(int) ($row['table_is_active'] ?? 1)) {
+                $row['name'] = ($row['name'] ?? 'Masa') . ' (deaktiv)';
+            }
+        }
+        unset($row);
+
+        $counter = $this->pdo->prepare(
+            "SELECT COUNT(s.id) AS sessions_count,
+                    COALESCE(SUM(s.time_charge), 0) AS time_revenue,
+                    COALESCE(SUM(s.products_total), 0) AS products_revenue,
+                    COALESCE(SUM(s.discount), 0) AS discount_total,
+                    COALESCE(SUM(s.total_amount), 0) AS total_revenue,
+                    COALESCE(SUM(s.active_seconds), 0) AS total_seconds
+             FROM sessions s
+             WHERE s.status = 'closed'
+               AND s.table_id IS NULL
+               AND DATE(s.closed_at) BETWEEN ? AND ?"
+        );
+        $counter->execute([$from, $to]);
+        $counterRow = $counter->fetch();
+        if ($counterRow && (int) ($counterRow['sessions_count'] ?? 0) > 0) {
+            $rows[] = [
+                'id' => 0,
+                'name' => 'Birbaşa satış (kassa)',
+                'table_is_active' => 1,
+                'is_counter' => true,
+                'sessions_count' => (int) $counterRow['sessions_count'],
+                'time_revenue' => (float) $counterRow['time_revenue'],
+                'products_revenue' => (float) $counterRow['products_revenue'],
+                'discount_total' => (float) $counterRow['discount_total'],
+                'total_revenue' => (float) $counterRow['total_revenue'],
+                'total_seconds' => (int) $counterRow['total_seconds'],
+            ];
+        }
+
+        return $rows;
     }
 
     public function summary(Request $request, Response $response): Response

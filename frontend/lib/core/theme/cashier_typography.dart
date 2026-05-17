@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'brand_colors.dart';
+import 'brand_colors.dart'; // DarkNeutral
 
 /// Brend şriftləri — oxunaqlıq üçün Barlow (condensed yalnız kiçik etiketlər).
 abstract final class CashierTypography {
@@ -52,8 +52,8 @@ abstract final class CashierTypography {
       );
 
   static TextTheme textTheme(Brightness brightness) {
-    final primary = brightness == Brightness.light ? BrandColors.navy : BrandColors.textOnNavy;
-    final secondary = brightness == Brightness.light ? BrandColors.textMutedLight : const Color(0xFFA8C4E8);
+    final primary = brightness == Brightness.light ? BrandColors.navy : DarkNeutral.textHigh;
+    final secondary = brightness == Brightness.light ? BrandColors.textMutedLight : DarkNeutral.textMedium;
 
     return TextTheme(
       headlineLarge: display(size: 26, color: primary, weight: FontWeight.w600),

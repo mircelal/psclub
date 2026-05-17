@@ -252,6 +252,12 @@ class PosService {
     await _api.put('/products/$id', data: data);
   }
 
+  Future<String> uploadProductImageMultipart(int productId, MultipartFile file) async {
+    final form = FormData.fromMap({'image': file});
+    final res = await _api.postMultipart('/products/$productId/image', form);
+    return (res['data'] as Map<String, dynamic>)['image_url'] as String;
+  }
+
   Future<String> uploadProductImage(int productId, String filePath) async {
     final form = FormData.fromMap({
       'image': await MultipartFile.fromFile(filePath),
@@ -295,6 +301,12 @@ class PosService {
 
   Future<void> updateSettings(Map<String, dynamic> data) async {
     await _api.put('/settings', data: data);
+  }
+
+  Future<String> uploadBusinessLogoMultipart(MultipartFile logoFile) async {
+    final form = FormData.fromMap({'logo': logoFile});
+    final res = await _api.postMultipart('/settings/logo', form);
+    return (res['data'] as Map<String, dynamic>)['logo_url'] as String;
   }
 
   Future<String> uploadBusinessLogo(String filePath) async {

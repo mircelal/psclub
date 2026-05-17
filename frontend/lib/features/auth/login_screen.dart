@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/auth/auth_state.dart';
@@ -32,8 +33,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     });
     try {
       await ref.read(authProvider.notifier).login(_userCtrl.text.trim(), _passCtrl.text);
+    } on DioException catch (e) {
+      final msg = e.response?.data;
+      if (msg is Map && msg['message'] != null) {
+        setState(() => _error = msg['message'].toString());
+      } else if (e.type == DioExceptionType.connectionError) {
+        setState(() => _error = 'Serverə qoşulmaq olmur (CORS və ya API URL)');
+      } else {
+        setState(() => _error = e.message ?? 'Giriş uğursuz oldu');
+      }
     } catch (e) {
-      setState(() => _error = 'İstifadəçi adı və ya şifrə yanlışdır');
+      setState(() => _error = 'İstifadəçi adı və ya şifrə yanlışdır ($e)');
     } finally {
       if (mounted) setState(() => _loading = false);
     }

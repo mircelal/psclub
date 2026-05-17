@@ -1,10 +1,12 @@
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/config/media_url.dart';
 import '../../core/utils/json_parse.dart';
+import '../../core/utils/multipart_file_helper.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_palette.dart';
 import '../../core/theme/app_spacing.dart';
@@ -77,18 +79,22 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> with SingleTick
     }).toList();
   }
 
-  Future<String?> _pickImageFile() async {
+  Future<PlatformFile?> _pickImageFile() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.image,
-      withData: false,
+      withData: kIsWeb,
       allowMultiple: false,
     );
     if (result == null || result.files.isEmpty) return null;
-    return result.files.single.path;
+    return result.files.single;
   }
 
-  Future<void> _uploadImage(int productId, String path) async {
-    await ref.read(posServiceProvider).uploadProductImage(productId, path);
+  Future<void> _uploadImage(int productId, PlatformFile file) async {
+    final multipart = await multipartFromPlatformFile(file, fallbackName: 'product.jpg');
+    if (multipart == null) {
+      throw StateError('Şəkil oxunmadı');
+    }
+    await ref.read(posServiceProvider).uploadProductImageMultipart(productId, multipart);
   }
 
   Future<int?> _showCategoryForm({Map<String, dynamic>? existing}) async {
@@ -201,7 +207,7 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> with SingleTick
     final priceCtrl = TextEditingController(text: isEdit ? jsonToDouble(product['price']).toStringAsFixed(2) : '2');
     final stockCtrl = TextEditingController(text: isEdit ? '${jsonToInt(product['stock_quantity'])}' : '20');
     final skuCtrl = TextEditingController(text: product?['sku']?.toString() ?? '');
-    String? pickedPath;
+    PlatformFile? pickedFile;
     int? categoryId = jsonToIntOrNull(product?['category_id']);
     final existingImage = product?['image_url'] as String?;
 
@@ -218,13 +224,13 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> with SingleTick
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               _ImagePickTile(
-                imagePath: pickedPath,
-                existingImageUrl: pickedPath == null ? existingImage : null,
+                pickedFile: pickedFile,
+                existingImageUrl: pickedFile == null ? existingImage : null,
                 onPick: () async {
-                  final path = await _pickImageFile();
-                  if (path != null) setDlg(() => pickedPath = path);
+                  final file = await _pickImageFile();
+                  if (file != null) setDlg(() => pickedFile = file);
                 },
-                onClear: pickedPath != null ? () => setDlg(() => pickedPath = null) : null,
+                onClear: pickedFile != null ? () => setDlg(() => pickedFile = null) : null,
               ),
               const SizedBox(height: AppSpacing.lg),
               AppTextField(controller: nameCtrl, label: 'Məhsul adı'),
@@ -327,7 +333,7 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> with SingleTick
           'sku': skuCtrl.text.trim().isEmpty ? null : skuCtrl.text.trim(),
           'category_id': categoryId,
         });
-        if (pickedPath != null) await _uploadImage(id, pickedPath!);
+        if (pickedFile != null) await _uploadImage(id, pickedFile!);
         if (mounted) showAppSnackBar(context, 'Məhsul yeniləndi');
       } else {
         final newId = await ref.read(posServiceProvider).createProduct({
@@ -337,8 +343,8 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> with SingleTick
           if (skuCtrl.text.trim().isNotEmpty) 'sku': skuCtrl.text.trim(),
           if (categoryId != null) 'category_id': categoryId,
         });
-        if (pickedPath != null) await _uploadImage(newId, pickedPath!);
-        if (mounted) showAppSnackBar(context, pickedPath != null ? 'Məhsul və şəkil saxlanıldı' : 'Məhsul yaradıldı');
+        if (pickedFile != null) await _uploadImage(newId, pickedFile!);
+        if (mounted) showAppSnackBar(context, pickedFile != null ? 'Məhsul və şəkil saxlanıldı' : 'Məhsul yaradıldı');
       }
       _load();
     } catch (e) {
@@ -627,15 +633,25 @@ class _CategoryDropdown extends StatelessWidget {
   }
 }
 
+Widget _pickedFilePreview(PlatformFile file) {
+  if (file.bytes != null) {
+    return Image.memory(file.bytes!, fit: BoxFit.cover);
+  }
+  if (!kIsWeb && file.path != null) {
+    return Image.file(File(file.path!), fit: BoxFit.cover);
+  }
+  return const Center(child: Icon(Icons.image_outlined, size: 48));
+}
+
 class _ImagePickTile extends StatelessWidget {
   const _ImagePickTile({
-    required this.imagePath,
+    required this.pickedFile,
     required this.onPick,
     this.existingImageUrl,
     this.onClear,
   });
 
-  final String? imagePath;
+  final PlatformFile? pickedFile;
   final String? existingImageUrl;
   final VoidCallback onPick;
   final VoidCallback? onClear;
@@ -643,7 +659,7 @@ class _ImagePickTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    final hasFile = imagePath != null;
+    final hasFile = pickedFile != null;
     final hasExisting = !hasFile && existingImageUrl != null && existingImageUrl!.isNotEmpty;
 
     return Column(
@@ -666,7 +682,7 @@ class _ImagePickTile extends StatelessWidget {
                       children: [
                         ClipRRect(
                           borderRadius: BorderRadius.circular(AppSpacing.radiusMd - 1),
-                          child: Image.file(File(imagePath!), fit: BoxFit.cover),
+                          child: _pickedFilePreview(pickedFile!),
                         ),
                         const Positioned(
                           top: AppSpacing.sm,

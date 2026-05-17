@@ -5,6 +5,23 @@ import 'table_card.dart';
 import 'table_list_tile.dart';
 import 'table_session_state.dart';
 
+/// Grid/kart rejimində bir masa hüceyrəsinin maksimum eni (böyük monitorlarda kart böyüməsin).
+class _TableTileLimits {
+  const _TableTileLimits({
+    required this.maxWidth,
+    required this.minWidth,
+    required this.minColumns,
+    required this.maxColumns,
+    required this.aspectRatio,
+  });
+
+  final double maxWidth;
+  final double minWidth;
+  final int minColumns;
+  final int maxColumns;
+  final double aspectRatio;
+}
+
 class TablesLayout extends StatelessWidget {
   const TablesLayout({
     super.key,
@@ -30,6 +47,7 @@ class TablesLayout extends StatelessWidget {
         final w = constraints.maxWidth;
         final bp = CashierBreakpoints.fromWidth(w);
         final padding = EdgeInsets.all(bp.isMobile ? 10 : 16);
+        final spacing = bp.isMobile ? 8.0 : 12.0;
 
         return switch (viewMode) {
           TableViewMode.list => ListView.separated(
@@ -43,62 +61,119 @@ class TablesLayout extends StatelessWidget {
                 onSecondaryTap: (d) => _contextMenu(tables[i], d),
               ),
             ),
-          TableViewMode.card => _grid(
-              w,
-              _cardCrossCount(w),
-              bp.isMobile ? 0.95 : 0.88,
+          TableViewMode.card => _buildGrid(
+              width: w,
+              limits: _limitsForCard(bp),
               padding: padding,
+              spacing: spacing,
               compact: bp.isMobile,
             ),
-          TableViewMode.grid => _grid(
-              w,
-              _crossCount(w),
-              bp.isMobile ? 0.82 : (bp.isCompact ? 0.68 : 0.72),
+          TableViewMode.grid => _buildGrid(
+              width: w,
+              limits: _limitsForGrid(bp),
               padding: padding,
-              compact: bp.isCompact,
+              spacing: spacing,
+              compact: bp.isMobile || bp.isTablet,
             ),
         };
       },
     );
   }
 
-  int _crossCount(double w) {
-    if (w < 380) return 1;
-    if (w < 560) return 2;
-    if (w < 768) return 2;
-    if (w < 1024) return 3;
-    if (w < 1280) return 4;
-    if (w < 1600) return 5;
-    return 6;
+  _TableTileLimits _limitsForGrid(CashierBreakpoints bp) {
+    return switch (bp.size) {
+      CashierLayoutSize.mobile => const _TableTileLimits(
+          maxWidth: 520,
+          minWidth: 140,
+          minColumns: 1,
+          maxColumns: 2,
+          aspectRatio: 0.82,
+        ),
+      CashierLayoutSize.tablet => const _TableTileLimits(
+          maxWidth: 220,
+          minWidth: 150,
+          minColumns: 2,
+          maxColumns: 6,
+          aspectRatio: 0.72,
+        ),
+      CashierLayoutSize.desktop => const _TableTileLimits(
+          maxWidth: 200,
+          minWidth: 148,
+          minColumns: 3,
+          maxColumns: 12,
+          aspectRatio: 0.72,
+        ),
+    };
   }
 
-  int _cardCrossCount(double w) {
-    if (w < 480) return 1;
-    if (w < 720) return 2;
-    if (w < 1200) return 2;
-    return 3;
+  _TableTileLimits _limitsForCard(CashierBreakpoints bp) {
+    return switch (bp.size) {
+      CashierLayoutSize.mobile => const _TableTileLimits(
+          maxWidth: 520,
+          minWidth: 260,
+          minColumns: 1,
+          maxColumns: 1,
+          aspectRatio: 0.95,
+        ),
+      CashierLayoutSize.tablet => const _TableTileLimits(
+          maxWidth: 340,
+          minWidth: 240,
+          minColumns: 2,
+          maxColumns: 4,
+          aspectRatio: 0.88,
+        ),
+      CashierLayoutSize.desktop => const _TableTileLimits(
+          maxWidth: 300,
+          minWidth: 220,
+          minColumns: 2,
+          maxColumns: 8,
+          aspectRatio: 0.88,
+        ),
+    };
   }
 
-  Widget _grid(
-    double width,
-    int cross,
-    double aspect, {
+  /// Maksimum hüceyrə eninə görə sütun sayı — 27" və s. geniş ekranda daha çox masa.
+  static int _columnCount(double innerWidth, double spacing, _TableTileLimits limits) {
+    if (innerWidth <= 0) return limits.minColumns;
+
+    var cols = ((innerWidth + spacing) / (limits.maxWidth + spacing)).floor();
+    cols = cols.clamp(limits.minColumns, limits.maxColumns);
+
+    var tileW = (innerWidth - spacing * (cols - 1)) / cols;
+    if (tileW < limits.minWidth && cols > limits.minColumns) {
+      cols = ((innerWidth + spacing) / (limits.minWidth + spacing)).floor();
+      cols = cols.clamp(limits.minColumns, limits.maxColumns);
+      tileW = (innerWidth - spacing * (cols - 1)) / cols;
+    }
+
+    return cols;
+  }
+
+  Widget _buildGrid({
+    required double width,
+    required _TableTileLimits limits,
     required EdgeInsets padding,
+    required double spacing,
     required bool compact,
   }) {
+    final inner = width - padding.horizontal;
+    final cross = _columnCount(inner, spacing, limits);
+    final tileW = cross > 0 ? (inner - spacing * (cross - 1)) / cross : inner;
+    final useCompact = compact || tileW < 195;
+
     return GridView.builder(
       padding: padding,
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: cross,
-        crossAxisSpacing: compact ? 8 : 12,
-        mainAxisSpacing: compact ? 8 : 12,
-        childAspectRatio: aspect,
+        crossAxisSpacing: spacing,
+        mainAxisSpacing: spacing,
+        childAspectRatio: limits.aspectRatio,
       ),
       itemCount: tables.length,
       itemBuilder: (_, i) => TableCard(
         table: tables[i],
         tick: tick,
-        compact: compact,
+        compact: useCompact,
         onTap: () => _tap(tables[i]),
         onSecondaryTap: (d) => _contextMenu(tables[i], d),
       ),

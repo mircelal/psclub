@@ -33,7 +33,7 @@ Future<bool> showOpenShiftDialog(BuildContext context, WidgetRef ref) async {
 
   try {
     await ref.read(posServiceProvider).openShift(double.tryParse(ctrl.text.replaceAll(',', '.')) ?? 0);
-    ref.invalidate(currentShiftProvider);
+    refreshCurrentShift(ref);
     if (context.mounted) {
       showAppSnackBar(context, 'Növbə açıldı');
     }
@@ -134,7 +134,7 @@ Future<void> showCashPayInDialog(BuildContext context, WidgetRef ref, int shiftI
       amount: amount,
       description: note,
     );
-    ref.invalidate(currentShiftProvider);
+    refreshCurrentShift(ref);
     if (context.mounted) showAppSnackBar(context, 'Kassaya $amount AZN əlavə edildi');
   } catch (e) {
     if (context.mounted) showAppSnackBar(context, e.toString(), isError: true);
@@ -221,7 +221,7 @@ Future<void> showCashOutDialog(BuildContext context, WidgetRef ref, int shiftId)
       category: type == 'expense' ? category : null,
       description: noteCtrl.text.trim().isEmpty ? null : noteCtrl.text.trim(),
     );
-    ref.invalidate(currentShiftProvider);
+    refreshCurrentShift(ref);
     if (context.mounted) showAppSnackBar(context, 'Əməliyyat qeydə alındı');
   } catch (e) {
     if (context.mounted) showAppSnackBar(context, e.toString(), isError: true);
@@ -296,7 +296,7 @@ Future<void> showCloseShiftDialog(BuildContext context, WidgetRef ref, Map<Strin
           closingCash: double.tryParse(closingCtrl.text.replaceAll(',', '.')) ?? 0,
           notes: notesCtrl.text.trim(),
         );
-    ref.invalidate(currentShiftProvider);
+    refreshCurrentShift(ref);
     if (!context.mounted) return;
 
     final summary = result['summary'] as Map<String, dynamic>? ?? {};

@@ -23,6 +23,10 @@ final class JwtAuthMiddleware implements MiddlewareInterface
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         $header = $request->getHeaderLine('Authorization');
+        if ($header === '') {
+            $server = $request->getServerParams();
+            $header = (string) ($server['HTTP_AUTHORIZATION'] ?? $server['REDIRECT_HTTP_AUTHORIZATION'] ?? '');
+        }
         if (!preg_match('/Bearer\s+(\S+)/', $header, $matches)) {
             return ApiResponse::error('Unauthorized', 401);
         }

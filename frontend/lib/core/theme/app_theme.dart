@@ -29,14 +29,16 @@ class AppTheme {
         : const ColorScheme.dark(
             primary: BrandColors.brightBlue,
             onPrimary: Colors.white,
-            secondary: BrandColors.sky,
-            onSecondary: BrandColors.navy,
-            surface: CashierTheme.darkSurfaceSidebar,
-            onSurface: BrandColors.textOnNavy,
-            surfaceContainerHighest: CashierTheme.darkSurfaceRaised,
-            onSurfaceVariant: Color(0xFF8EB4E8),
-            outline: CashierTheme.darkBorder,
-            error: Color(0xFFE04B4B),
+            secondary: Color(0xFF8AB4F8),
+            onSecondary: DarkNeutral.textHigh,
+            surface: DarkNeutral.surface1,
+            onSurface: DarkNeutral.textHigh,
+            surfaceContainerHighest: DarkNeutral.surface2,
+            surfaceContainerHigh: DarkNeutral.surface3,
+            onSurfaceVariant: DarkNeutral.textMedium,
+            outline: DarkNeutral.border,
+            outlineVariant: Color(0xFF2C2C2C),
+            error: Color(0xFFF28B82),
           );
 
     final onSurface = scheme.onSurface;
@@ -102,7 +104,7 @@ class AppTheme {
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: isLight ? Colors.white : BrandColors.navyMid,
+        fillColor: isLight ? Colors.white : DarkNeutral.surface2,
         contentPadding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.md + 2),
         hintStyle: CashierTypography.ui(size: 14, color: onSurfaceVariant, weight: FontWeight.w400),
         labelStyle: CashierTypography.ui(size: 13, color: onSurfaceVariant, weight: FontWeight.w500),
@@ -147,7 +149,7 @@ class AppTheme {
         style: TextButton.styleFrom(foregroundColor: BrandColors.brightBlue),
       ),
       chipTheme: ChipThemeData(
-        backgroundColor: isLight ? BrandColors.skyPale : BrandColors.navyMid,
+        backgroundColor: isLight ? BrandColors.skyPale : DarkNeutral.surface2,
         side: BorderSide(color: scheme.outline.withValues(alpha: 0.7)),
         labelStyle: CashierTypography.ui(size: 13, color: onSurface, weight: FontWeight.w500),
         padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
@@ -155,10 +157,26 @@ class AppTheme {
       ),
       snackBarTheme: SnackBarThemeData(
         backgroundColor: isLight ? BrandColors.navy : CashierTheme.darkSurfaceRaised,
-        contentTextStyle: CashierTypography.ui(size: 14, color: BrandColors.textOnNavy, weight: FontWeight.w500),
+        contentTextStyle: CashierTypography.ui(
+          size: 14,
+          color: isLight ? BrandColors.textOnNavy : DarkNeutral.textHigh,
+          weight: FontWeight.w500,
+        ),
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(CashierTheme.radiusControl)),
       ),
+      iconTheme: IconThemeData(
+        color: isLight ? BrandColors.navy : DarkNeutral.textHigh,
+        size: 22,
+      ),
+      primaryIconTheme: IconThemeData(
+        color: isLight ? BrandColors.brightBlue : const Color(0xFF8AB4F8),
+      ),
+      listTileTheme: ListTileThemeData(
+        iconColor: isLight ? BrandColors.textMutedLight : DarkNeutral.textMedium,
+        textColor: onSurface,
+      ),
+      dividerTheme: DividerThemeData(color: scheme.outline.withValues(alpha: 0.65)),
     );
   }
 

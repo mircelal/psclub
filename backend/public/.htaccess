@@ -1,4 +1,24 @@
 RewriteEngine On
+RewriteBase /
+
+# PHP-FPM/CGI Authorization başlığını itirə bilər — JWT üçün lazımdır (logo upload və s.)
+RewriteCond %{HTTP:Authorization} .
+RewriteRule ^ - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+# CORS — Flutter web (ps.sayt.cam → psapi.sayt.cam). PHP-dən əvvəl OPTIONS cavabı.
+<IfModule mod_headers.c>
+    Header always set Access-Control-Allow-Origin "https://ps.sayt.cam"
+    Header always set Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+    Header always set Access-Control-Allow-Headers "Content-Type, Authorization, Accept"
+    Header always set Access-Control-Max-Age "86400"
+</IfModule>
+
+RewriteCond %{REQUEST_METHOD} OPTIONS
+RewriteRule ^ - [R=204,L]
+
+# Default səhifə index.php olsun (DirectAdmin index.html üstün tutmasın)
+DirectoryIndex index.php index.html
+
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^ index.php [QSA,L]

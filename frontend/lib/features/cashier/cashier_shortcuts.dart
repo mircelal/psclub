@@ -156,7 +156,7 @@ class _ShortcutRow extends StatelessWidget {
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w600,
-              color: isLight ? BrandColors.navy : BrandColors.textOnNavy,
+              color: isLight ? BrandColors.navy : DarkNeutral.textHigh,
               fontFeatures: const [FontFeature.tabularFigures()],
             ),
           ),

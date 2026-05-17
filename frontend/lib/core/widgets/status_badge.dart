@@ -30,7 +30,7 @@ class StatusBadge extends StatelessWidget {
           const SizedBox(width: 6),
           Text(
             label,
-            style: TextStyle(color: style.accent, fontSize: 11, fontWeight: FontWeight.w500),
+            style: TextStyle(color: style.badgeLabelColor(), fontSize: 11, fontWeight: FontWeight.w600),
           ),
         ],
       ),
