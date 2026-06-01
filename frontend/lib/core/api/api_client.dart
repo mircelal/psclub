@@ -11,6 +11,13 @@ final apiClientProvider = Provider<ApiClient>((ref) {
 
 class ApiClient {
   ApiClient(this._storage) {
+    _initDio();
+  }
+
+  /// 401-dən sonra token silinəndə auth state sıfırlansın.
+  void Function()? onUnauthorized;
+
+  void _initDio() {
     _dio = Dio(BaseOptions(
       baseUrl: ApiConfig.baseUrl,
       connectTimeout: const Duration(seconds: 15),
@@ -24,6 +31,17 @@ class ApiClient {
           options.headers['Authorization'] = 'Bearer $token';
         }
         handler.next(options);
+      },
+      onError: (error, handler) async {
+        if (error.response?.statusCode == 401) {
+          final path = error.requestOptions.path;
+          final isPublic = path.contains('/public/') || path.contains('/auth/login');
+          if (!isPublic) {
+            await _storage.delete();
+            onUnauthorized?.call();
+          }
+        }
+        handler.next(error);
       },
     ));
   }
@@ -57,8 +75,8 @@ class ApiClient {
     return _unwrap(res);
   }
 
-  Future<Map<String, dynamic>> delete(String path) async {
-    final res = await _dio.delete(path);
+  Future<Map<String, dynamic>> delete(String path, {Map<String, dynamic>? data}) async {
+    final res = await _dio.delete(path, data: data);
     return _unwrap(res);
   }
 

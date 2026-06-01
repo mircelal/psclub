@@ -6,6 +6,7 @@ import 'package:launch_at_startup/launch_at_startup.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'app_settings.dart';
+import 'windows_kiosk_shell.dart';
 
 /// Windows (və digər desktop) pəncərə: kiosk rejimi və avtomatik başlatma.
 abstract final class DesktopWindowService {
@@ -34,6 +35,7 @@ abstract final class DesktopWindowService {
       } else {
         await LaunchAtStartup.instance.disable();
       }
+      await WindowsKioskShell.setEnabled(settings.kioskModeEnabled);
     }
 
     await WindowManager.instance.setPreventClose(settings.kioskModeEnabled);

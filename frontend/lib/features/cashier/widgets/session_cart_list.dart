@@ -54,6 +54,7 @@ class SessionCartList extends StatelessWidget {
         ...items.map((raw) {
           final item = raw as Map<String, dynamic>;
           final qty = jsonToInt(item['quantity'], 1);
+          final isSetItem = item['is_set_item'] == true || item['is_set_item'] == 1;
           final unitPrice = jsonToDouble(item['unit_price']);
           final lineTotal = unitPrice * qty;
           return Container(
@@ -84,32 +85,39 @@ class SessionCartList extends StatelessWidget {
                         style: TextStyle(fontWeight: FontWeight.w600, fontSize: compact ? 13 : 14, color: p.textPrimary),
                       ),
                       Text(
-                        '${unitPrice.toStringAsFixed(2)} ₼',
+                        isSetItem ? 'Paket daxilində' : '${unitPrice.toStringAsFixed(2)} ₼',
                         style: TextStyle(fontSize: 11, color: p.textMuted),
                       ),
                     ],
                   ),
                 ),
-                _QtyControl(
-                  qty: qty,
-                  onMinus: () => onDecrease(item),
-                  onPlus: () => onIncrease(item),
-                ),
+                if (!isSetItem)
+                  _QtyControl(
+                    qty: qty,
+                    onMinus: () => onDecrease(item),
+                    onPlus: () => onIncrease(item),
+                  )
+                else
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Text('×$qty', style: TextStyle(fontWeight: FontWeight.w600, color: p.textMuted)),
+                  ),
                 const SizedBox(width: AppSpacing.sm),
                 SizedBox(
                   width: compact ? 56 : 64,
                   child: Text(
-                    '${lineTotal.toStringAsFixed(2)} ₼',
+                    isSetItem ? '—' : '${lineTotal.toStringAsFixed(2)} ₼',
                     textAlign: TextAlign.end,
                     style: TextStyle(fontWeight: FontWeight.w600, color: p.textPrimary, fontSize: compact ? 12 : 13),
                   ),
                 ),
-                IconButton(
-                  onPressed: () => onRemove(item),
-                  icon: Icon(Icons.delete_outline, size: 20, color: AppColors.danger.withValues(alpha: 0.85)),
-                  tooltip: 'Sil',
-                  visualDensity: VisualDensity.compact,
-                ),
+                if (!isSetItem)
+                  IconButton(
+                    onPressed: () => onRemove(item),
+                    icon: Icon(Icons.delete_outline, size: 20, color: AppColors.danger.withValues(alpha: 0.85)),
+                    tooltip: 'Sil',
+                    visualDensity: VisualDensity.compact,
+                  ),
               ],
             ),
           );

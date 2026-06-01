@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/layout/mobile_ui.dart';
 import '../../../core/theme/cashier_theme.dart';
 
 enum CashierTableFilter { all, active, empty }
@@ -22,15 +23,9 @@ class CashierFilterBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (compact) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text('STANSİYALAR', style: CashierTheme.sectionTitle(context)),
-          const SizedBox(height: 4),
-          Text(unitLabel, style: CashierTheme.stationTitle(context, size: 16)),
-          const SizedBox(height: 10),
-          _SegmentedFilter(selected: filter, onChanged: onChanged, stretch: true),
-        ],
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(8, 2, 8, 4),
+        child: _MobileFilterChips(selected: filter, onChanged: onChanged),
       );
     }
 
@@ -57,6 +52,60 @@ class CashierFilterBar extends StatelessWidget {
                 filterWidget,
               ],
             ),
+    );
+  }
+}
+
+/// Mobil — böyük toxunma hədəfi ilə üfüqi çiplər.
+class _MobileFilterChips extends StatelessWidget {
+  const _MobileFilterChips({required this.selected, required this.onChanged});
+
+  final CashierTableFilter selected;
+  final ValueChanged<CashierTableFilter> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        _chip(context, 'Hamısı', CashierTableFilter.all),
+        const SizedBox(width: 8),
+        _chip(context, 'Aktiv', CashierTableFilter.active),
+        const SizedBox(width: 8),
+        _chip(context, 'Boş', CashierTableFilter.empty),
+      ],
+    );
+  }
+
+  Widget _chip(BuildContext context, String label, CashierTableFilter value) {
+    final isSelected = selected == value;
+    return Expanded(
+      child: Material(
+        color: isSelected ? CashierTheme.surfaceRaised(context) : CashierTheme.surfaceSecondary(context),
+        borderRadius: BorderRadius.circular(CashierTheme.radiusControl),
+        child: InkWell(
+          onTap: () => onChanged(value),
+          borderRadius: BorderRadius.circular(CashierTheme.radiusControl),
+          child: Container(
+            constraints: const BoxConstraints(minHeight: kMinTouchTarget),
+            alignment: Alignment.center,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+            decoration: isSelected
+                ? BoxDecoration(
+                    borderRadius: BorderRadius.circular(CashierTheme.radiusControl),
+                    border: Border.all(color: CashierTheme.accent(context).withValues(alpha: 0.4)),
+                  )
+                : null,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                color: isSelected ? CashierTheme.accent(context) : CashierTheme.textSecondary(context),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -109,7 +158,7 @@ class _SegmentedFilter extends StatelessWidget {
 
   Widget _seg(BuildContext context, String label, CashierTableFilter value, {bool stretch = false}) {
     final isSelected = selected == value;
-    final child = Material(
+    return Material(
       color: isSelected ? CashierTheme.surfaceRaised(context) : Colors.transparent,
       borderRadius: BorderRadius.circular(CashierTheme.radiusControl),
       child: InkWell(
@@ -118,7 +167,8 @@ class _SegmentedFilter extends StatelessWidget {
         hoverColor: CashierTheme.accentSubtle(context),
         child: Container(
           width: stretch ? double.infinity : null,
-          padding: EdgeInsets.symmetric(horizontal: stretch ? 12 : 14, vertical: stretch ? 9 : 7),
+          constraints: BoxConstraints(minHeight: stretch ? kMinTouchTarget : 0),
+          padding: EdgeInsets.symmetric(horizontal: stretch ? 12 : 14, vertical: stretch ? 12 : 7),
           decoration: isSelected
               ? BoxDecoration(
                   color: CashierTheme.surfaceRaised(context),
@@ -135,7 +185,7 @@ class _SegmentedFilter extends StatelessWidget {
               : null,
           child: Text(
             label,
-            textAlign: stretch ? TextAlign.left : TextAlign.center,
+            textAlign: stretch ? TextAlign.center : TextAlign.center,
             style: TextStyle(
               fontSize: 13,
               fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
@@ -145,6 +195,5 @@ class _SegmentedFilter extends StatelessWidget {
         ),
       ),
     );
-    return stretch ? child : child;
   }
 }

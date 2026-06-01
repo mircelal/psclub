@@ -27,11 +27,17 @@ final class CustomersController
         }
 
         $sql = 'SELECT c.*,
+                cg.name AS customer_group_name,
+                cg.discount_type AS customer_group_discount_type,
+                cg.discount_value AS customer_group_discount_value,
+                cg.applies_to AS customer_group_applies_to,
+                cg.color AS customer_group_color,
                 COALESCE(SUM(CASE WHEN s.status = \'closed\' THEN s.total_amount ELSE 0 END), 0) AS total_spent,
                 COALESCE(SUM(CASE WHEN s.status = \'closed\' THEN 1 ELSE 0 END), 0) AS closed_session_count,
                 COUNT(s.id) AS session_count,
                 COALESCE(SUM(CASE WHEN s.status IN (\'active\', \'paused\') THEN 1 ELSE 0 END), 0) AS open_session_count
             FROM customers c
+            LEFT JOIN customer_groups cg ON cg.id = c.customer_group_id AND cg.is_active = 1
             LEFT JOIN sessions s ON s.customer_id = c.id
             WHERE c.is_active = 1';
 
@@ -44,7 +50,7 @@ final class CustomersController
             $params = [$like, $like, $phoneLike, $like];
         }
 
-        $sql .= ' GROUP BY c.id';
+        $sql .= ' GROUP BY c.id, cg.id, cg.name, cg.discount_type, cg.discount_value, cg.applies_to, cg.color';
 
         $sql .= match ($filter) {
             'with_spending' => ' HAVING total_spent > 0',
@@ -92,13 +98,16 @@ final class CustomersController
         }
 
         $this->pdo->prepare(
-            'INSERT INTO customers (business_id, name, phone, email, notes, is_active, created_at, updated_at)
-             VALUES (1, ?, ?, ?, ?, 1, NOW(), NOW())'
+            'INSERT INTO customers (business_id, name, phone, email, notes, customer_group_id, is_active, created_at, updated_at)
+             VALUES (1, ?, ?, ?, ?, ?, 1, NOW(), NOW())'
         )->execute([
             trim($body['name']),
             $phone,
             $body['email'] ?? null,
             $body['notes'] ?? null,
+            isset($body['customer_group_id']) && (int) $body['customer_group_id'] > 0
+                ? (int) $body['customer_group_id']
+                : null,
         ]);
 
         $id = (int) $this->pdo->lastInsertId();
@@ -130,10 +139,12 @@ final class CustomersController
             $fields[] = 'phone = ?';
             $params[] = $phone;
         }
-        foreach (['email', 'notes', 'is_active'] as $key) {
+        foreach (['email', 'notes', 'is_active', 'customer_group_id'] as $key) {
             if (array_key_exists($key, $body)) {
                 $fields[] = "{$key} = ?";
-                $params[] = $body[$key];
+                $params[] = $key === 'customer_group_id'
+                    ? (((int) ($body[$key] ?? 0)) > 0 ? (int) $body[$key] : null)
+                    : $body[$key];
             }
         }
         if ($fields === []) {
@@ -152,7 +163,14 @@ final class CustomersController
     public function show(Request $request, Response $response, array $args): Response
     {
         $id = (int) $args['id'];
-        $stmt = $this->pdo->prepare('SELECT * FROM customers WHERE id = ? AND is_active = 1');
+        $stmt = $this->pdo->prepare(
+            'SELECT c.*, cg.name AS customer_group_name, cg.discount_type AS customer_group_discount_type,
+                    cg.discount_value AS customer_group_discount_value, cg.applies_to AS customer_group_applies_to,
+                    cg.color AS customer_group_color
+             FROM customers c
+             LEFT JOIN customer_groups cg ON cg.id = c.customer_group_id AND cg.is_active = 1
+             WHERE c.id = ? AND c.is_active = 1'
+        );
         $stmt->execute([$id]);
         $customer = $stmt->fetch();
         if (!$customer) {

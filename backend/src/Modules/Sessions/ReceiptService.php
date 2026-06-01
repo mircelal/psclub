@@ -4,14 +4,18 @@ declare(strict_types=1);
 
 namespace App\Modules\Sessions;
 
+use App\Support\ReceiptCleanup;
 use Dompdf\Dompdf;
 use Dompdf\Options;
 use PDO;
 
 final class ReceiptService
 {
+    private readonly string $storageRoot;
+
     public function __construct(private readonly PDO $pdo)
     {
+        $this->storageRoot = dirname(__DIR__, 3) . '/storage';
     }
 
     private function setLine(array $session): ?string
@@ -38,14 +42,20 @@ final class ReceiptService
 
     public function buildReceipt(array $session, array $bill, string $method, float $cash, float $card): array
     {
+        ReceiptCleanup::maybeRun($this->pdo, $this->storageRoot);
+
         $settings = $this->getSettings();
         $header = $settings['receipt_header'] ?? 'PS Club';
         $footer = $settings['receipt_footer'] ?? 'Təşəkkür edirik!';
 
+        $tableLabel = ($session['session_type'] ?? 'table') === 'counter'
+            ? ($session['table_name'] ?? 'Kassa satışı')
+            : ($session['table_name'] ?? 'Masa');
+
         $lines = [
             ['type' => 'text', 'content' => $header, 'align' => 'center', 'bold' => true],
             ['type' => 'text', 'content' => str_repeat('-', 32)],
-            ['type' => 'text', 'content' => 'Masa: ' . $session['table_name']],
+            ['type' => 'text', 'content' => 'Masa: ' . $tableLabel],
             ['type' => 'text', 'content' => 'Açılış: ' . $session['opened_at']],
             ['type' => 'text', 'content' => 'Bağlanış: ' . ($session['closed_at'] ?? date('Y-m-d H:i:s'))],
             ['type' => 'text', 'content' => 'Müddət: ' . $bill['active_minutes'] . ' dəq'],
@@ -82,32 +92,58 @@ final class ReceiptService
             'INSERT INTO receipts (session_id, receipt_number, payload, created_at) VALUES (?, ?, ?, NOW())'
         )->execute([(int) $session['id'], $receiptNumber, $payload]);
 
-        $pdfPath = $this->generatePdf($receiptNumber, $lines, $session, $bill);
+        $sessionId = (int) $session['id'];
 
         return [
             'receipt_number' => $receiptNumber,
             'receipt_lines' => $lines,
-            'pdf_url' => $pdfPath ? '/storage/receipts/' . basename($pdfPath) : null,
+            // PDF serverdə saxlanmır — lazım olsa API-dən generasiya (24 saat ərzində)
+            'pdf_url' => '/api/receipts/' . $sessionId . '/pdf',
         ];
     }
 
-    public function generatePdfForSession(int $sessionId): ?string
+    /** PDF bytes — diskə yazılmır. 24 saatdan köhnə qəbzdə null. */
+    public function renderPdfForSession(int $sessionId): ?string
     {
-        $stmt = $this->pdo->prepare('SELECT * FROM receipts WHERE session_id = ? ORDER BY id DESC LIMIT 1');
-        $stmt->execute([$sessionId]);
+        ReceiptCleanup::maybeRun($this->pdo, $this->storageRoot);
+
+        $stmt = $this->pdo->prepare(
+            'SELECT * FROM receipts WHERE session_id = ? AND created_at >= DATE_SUB(NOW(), INTERVAL ? HOUR) ORDER BY id DESC LIMIT 1'
+        );
+        $stmt->execute([$sessionId, ReceiptCleanup::RETENTION_HOURS]);
         $receipt = $stmt->fetch();
         if (!$receipt) {
             return null;
         }
-        $data = json_decode($receipt['payload'], true);
-        $session = $this->pdo->prepare('SELECT s.*, t.name AS table_name FROM sessions s JOIN tables t ON t.id = s.table_id WHERE s.id = ?');
+
+        $data = json_decode((string) $receipt['payload'], true);
+        if (!is_array($data)) {
+            return null;
+        }
+
+        $session = $this->pdo->prepare(
+            'SELECT s.*, t.name AS table_name
+             FROM sessions s
+             LEFT JOIN tables t ON t.id = s.table_id
+             WHERE s.id = ?'
+        );
         $session->execute([$sessionId]);
         $sessionRow = $session->fetch();
+        if (!$sessionRow) {
+            return null;
+        }
+        if (($sessionRow['session_type'] ?? 'table') === 'counter' && empty($sessionRow['table_name'])) {
+            $sessionRow['table_name'] = 'Kassa satışı';
+        }
 
-        return $this->generatePdf($receipt['receipt_number'], $data['lines'] ?? [], $sessionRow, $data['bill'] ?? []);
+        return $this->renderPdfBytes(
+            (string) $receipt['receipt_number'],
+            $data['lines'] ?? []
+        );
     }
 
-    private function generatePdf(string $number, array $lines, array $session, array $bill): ?string
+    /** @param list<array<string, mixed>> $lines */
+    private function renderPdfBytes(string $number, array $lines): string
     {
         $html = '<html><body style="font-family:DejaVu Sans;font-size:12px;">';
         $html .= '<h3 style="text-align:center;">' . htmlspecialchars($number) . '</h3>';
@@ -118,11 +154,6 @@ final class ReceiptService
         }
         $html .= '</body></html>';
 
-        $dir = __DIR__ . '/../../../storage/receipts';
-        if (!is_dir($dir)) {
-            mkdir($dir, 0755, true);
-        }
-
         $options = new Options();
         $options->set('isRemoteEnabled', false);
         $dompdf = new Dompdf($options);
@@ -130,12 +161,7 @@ final class ReceiptService
         $dompdf->setPaper([0, 0, 226.77, 600], 'portrait');
         $dompdf->render();
 
-        $path = $dir . '/' . $number . '.pdf';
-        file_put_contents($path, $dompdf->output());
-
-        $this->pdo->prepare('UPDATE receipts SET pdf_path = ? WHERE receipt_number = ?')->execute([$path, $number]);
-
-        return $path;
+        return (string) $dompdf->output();
     }
 
     private function getSettings(): array
@@ -145,6 +171,7 @@ final class ReceiptService
         foreach ($stmt->fetchAll() as $row) {
             $settings[$row['key']] = $row['value'];
         }
+
         return $settings;
     }
 }

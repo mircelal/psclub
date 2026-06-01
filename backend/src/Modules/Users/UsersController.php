@@ -57,13 +57,40 @@ final class UsersController
             $fields[] = 'full_name = ?';
             $params[] = $body['full_name'];
         }
+        $current = $request->getAttribute('user');
+        $targetStmt = $this->pdo->prepare('SELECT id, role, is_active FROM users WHERE id = ?');
+        $targetStmt->execute([$id]);
+        $target = $targetStmt->fetch();
+        if (!$target) {
+            return ApiResponse::error('İstifadəçi tapılmadı', 404);
+        }
+
+        $newRole = $body['role'] ?? $target['role'];
+        $newActive = isset($body['is_active']) ? (bool) $body['is_active'] : (bool) $target['is_active'];
+
+        if ($current && (int) $current['id'] === $id) {
+            if ($newRole !== 'admin') {
+                return ApiResponse::error('Öz rolunuzu dəyişə bilməzsiniz', 403);
+            }
+            if (!$newActive) {
+                return ApiResponse::error('Öz hesabınızı deaktiv edə bilməzsiniz', 403);
+            }
+        }
+
+        if ($target['role'] === 'admin' && (int) $target['is_active'] === 1) {
+            $wouldLoseAdmin = ($newRole !== 'admin' || !$newActive);
+            if ($wouldLoseAdmin && $this->countActiveAdmins() <= 1) {
+                return ApiResponse::error('Son aktiv administrator dəyişdirilə bilməz', 422);
+            }
+        }
+
         if (isset($body['role']) && in_array($body['role'], ['admin', 'cashier'], true)) {
             $fields[] = 'role = ?';
             $params[] = $body['role'];
         }
         if (isset($body['is_active'])) {
             $fields[] = 'is_active = ?';
-            $params[] = (int) (bool) $body['is_active'];
+            $params[] = (int) $newActive;
         }
         if (!empty($body['password'])) {
             $fields[] = 'password_hash = ?';
@@ -84,7 +111,35 @@ final class UsersController
     public function destroy(Request $request, Response $response, array $args): Response
     {
         $id = (int) $args['id'];
+        $current = $request->getAttribute('user');
+        if ($current && (int) $current['id'] === $id) {
+            return ApiResponse::error('Öz hesabınızı silə bilməzsiniz', 403);
+        }
+
+        $target = $this->pdo->prepare('SELECT id, role, is_active FROM users WHERE id = ?');
+        $target->execute([$id]);
+        $row = $target->fetch();
+        if (!$row) {
+            return ApiResponse::error('İstifadəçi tapılmadı', 404);
+        }
+
+        if ($row['role'] === 'admin' && (int) $row['is_active'] === 1) {
+            $admins = (int) $this->pdo->query(
+                "SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = 1"
+            )->fetchColumn();
+            if ($admins <= 1) {
+                return ApiResponse::error('Son aktiv administrator silinə bilməz', 422);
+            }
+        }
+
         $this->pdo->prepare('UPDATE users SET is_active = 0, updated_at = NOW() WHERE id = ?')->execute([$id]);
         return ApiResponse::success(['deleted' => true]);
+    }
+
+    private function countActiveAdmins(): int
+    {
+        return (int) $this->pdo->query(
+            "SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = 1"
+        )->fetchColumn();
     }
 }

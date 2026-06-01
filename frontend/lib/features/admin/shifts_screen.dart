@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../core/theme/admin_theme.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/theme/cashier_theme.dart';
 import '../../core/utils/json_parse.dart';
@@ -10,6 +9,7 @@ import '../../core/widgets/app_snackbar.dart';
 import '../../core/widgets/money_text.dart';
 import '../../services/pos_service.dart';
 import 'widgets/admin_page_layout.dart';
+import 'widgets/shift_detail_dialog.dart';
 
 class ShiftsScreen extends ConsumerStatefulWidget {
   const ShiftsScreen({super.key});
@@ -132,72 +132,14 @@ class _ShiftsScreenState extends ConsumerState<ShiftsScreen> with SingleTickerPr
   }
 
   Future<void> _showShiftDetail(int id) async {
-    final shift = await ref.read(posServiceProvider).getShift(id);
     if (!mounted) return;
-
-    final movements = shift['movements'] as List<dynamic>? ?? [];
-    final totals = shift['totals'] as Map<String, dynamic>? ?? {};
-    final isOpen = shift['status'] == 'open';
-
-    await showAppDialog<void>(
-      context: context,
-      title: 'Növbə #${shift['id']}',
-      subtitle: isOpen ? 'Açıq' : 'Bağlı · ${shift['opened_at']}',
-      icon: Icons.point_of_sale,
-      maxWidth: 560,
-      body: SizedBox(
-        width: 520,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _DetailLine('Operator', shift['opened_by_name']?.toString() ?? '—'),
-            _DetailLine('Başlanğıc kassa', '${jsonToDouble(shift['opening_cash']).toStringAsFixed(2)} AZN'),
-            if (!isOpen) ...[
-              _DetailLine('Gözlənilən', '${jsonToDouble(shift['expected_cash']).toStringAsFixed(2)} AZN'),
-              _DetailLine('Sayılan', '${jsonToDouble(shift['closing_cash']).toStringAsFixed(2)} AZN'),
-              _DetailLine(
-                'Fərq',
-                '${jsonToDouble(shift['cash_difference']).toStringAsFixed(2)} AZN',
-                highlight: jsonToDouble(shift['cash_difference']) != 0,
-              ),
-            ] else
-              _DetailLine('Gözlənilən kassa', '${jsonToDouble(totals['expected_cash']).toStringAsFixed(2)} AZN'),
-            const Divider(height: 24),
-            Text('Hərəkətlər', style: CashierTheme.sectionTitle(context)),
-            const SizedBox(height: 8),
-            if (movements.isEmpty)
-              Text('Hərəkət yoxdur', style: CashierTheme.caption(context))
-            else
-              ...movements.take(15).map((m) {
-                final map = m as Map<String, dynamic>;
-                final type = map['type'] as String? ?? '';
-                final label = _movementLabel(type, map['category'] as String?);
-                final amt = jsonToDouble(map['amount']);
-                return ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(label, style: const TextStyle(fontSize: 13)),
-                  subtitle: map['description'] != null ? Text(map['description'].toString(), style: CashierTheme.caption(context)) : null,
-                  trailing: Text(
-                    '${type == 'pay_in' ? '+' : '−'}${amt.toStringAsFixed(2)}',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      color: type == 'pay_in' ? Colors.green.shade700 : CashierTheme.textSecondary(context),
-                    ),
-                  ),
-                );
-              }),
-          ],
-        ),
-      ),
-      actions: [FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Bağla'))],
-    );
+    await showShiftDetailDialog(context, ref, id, categories: _categories);
   }
 
   String _movementLabel(String type, String? category) {
     if (type == 'owner_withdrawal') return 'Sahibkarə verilmə';
     if (type == 'pay_in') return 'Kassaya əlavə';
+    if (type == 'refund') return 'Satış qaytarması';
     final cats = (_categories['expense_categories'] as Map<String, dynamic>?) ?? {};
     return cats[category]?.toString() ?? category ?? 'Xərc';
   }
@@ -336,30 +278,3 @@ class _MovementsList extends StatelessWidget {
   }
 }
 
-class _DetailLine extends StatelessWidget {
-  const _DetailLine(this.label, this.value, {this.highlight = false});
-
-  final String label;
-  final String value;
-  final bool highlight;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: CashierTheme.caption(context)),
-          Text(
-            value,
-            style: TextStyle(
-              fontWeight: FontWeight.w600,
-              color: highlight ? Colors.orange.shade800 : null,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}

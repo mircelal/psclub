@@ -113,7 +113,7 @@ function Invoke-Checked {
 function Copy-BackendTree {
     param([string]$DestRoot)
 
-    $excludeDirs = @('vendor', 'node_modules', '.git', 'dist', 'scripts')
+    $excludeDirs = @('vendor', 'node_modules', '.git', 'dist', 'scripts', 'public')
     $excludeFiles = @('.env', '.env.local')
 
     Get-ChildItem -Path $BackendDir -Force | ForEach-Object {
@@ -126,25 +126,30 @@ function Copy-BackendTree {
     }
 }
 
-function Write-ProductionEnv([string]$Path, [string]$JwtSecret) {
-    @"
-APP_ENV=production
-APP_DEBUG=false
-APP_URL=https://$ApiDomain
-APP_TIMEZONE=Asia/Baku
+# Zip-ə daxil edilmir: .env, install.sql, server setup skriptləri
+$Script:BackendPublicSetupExclude = @(
+    'server-setup.php',
+    'run-migrate.php',
+    'reset-sales-data.php'
+)
+$Script:BackendDatabaseExclude = @('install.sql', 'setup.php')
 
-DB_HOST=$ServerDbHost
-DB_PORT=3306
-DB_NAME=$ServerDbName
-DB_USER=$ServerDbUser
-DB_PASS=$ServerDbPassword
+function Remove-BackendSetupFiles {
+    param([string[]]$Roots)
 
-JWT_SECRET=$JwtSecret
-JWT_TTL=86400
-
-CORS_ORIGIN=https://$WebDomain
-"@ | Set-Content -Path $Path -Encoding UTF8 -NoNewline
-    Add-Content -Path $Path -Value "" -Encoding UTF8
+    foreach ($root in $Roots) {
+        if (-not $root -or -not (Test-Path $root)) { continue }
+        foreach ($name in $Script:BackendPublicSetupExclude) {
+            Get-ChildItem -Path $root -Filter $name -Recurse -File -ErrorAction SilentlyContinue |
+                Remove-Item -Force -ErrorAction SilentlyContinue
+        }
+        Get-ChildItem -Path $root -Filter '.env' -Recurse -File -ErrorAction SilentlyContinue |
+            Remove-Item -Force -ErrorAction SilentlyContinue
+        Get-ChildItem -Path $root -Filter 'install.sql' -Recurse -File -ErrorAction SilentlyContinue |
+            Remove-Item -Force -ErrorAction SilentlyContinue
+        Get-ChildItem -Path $root -Filter 'setup.php' -Recurse -File -ErrorAction SilentlyContinue |
+            Remove-Item -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Write-DeployReadme([string]$Path, [string]$Kind) {
@@ -166,15 +171,17 @@ PS Club API — DirectAdmin quraşdırma
 
 3) Köhnə DirectAdmin "Something amazing" index.html mütləq silinsin!
 
-4) phpMyAdmin:
-   - Verilənlər bazası: $ServerDbName
-   - database/install.sql faylını IMPORT edin
+4) .env serverdə əvvəlcədən qalmalıdır (zip-ə daxil deyil).
+   Nümunə: backend/.env.example
 
-5) İcazələr: storage/ yazıla bilən (775)
+5) DB patch/migration: serverdə mövcud .env ilə phinx və ya əl ilə SQL patch.
+   Ətraflı: docs/DEPLOY-MIGRATION-AZ.md
 
-6) PHP 8.2+ seçin (DirectAdmin → PHP Selector)
+6) İcazələr: storage/ yazıla bilən (775)
 
-7) Test əvvəl: https://$ApiDomain/ping.php
+7) PHP 8.2+ seçin (DirectAdmin → PHP Selector)
+
+8) Test əvvəl: https://$ApiDomain/ping.php
    Sonra: https://$ApiDomain/api/health
 
 Demo giriş: admin / admin  |  kassir / kassir
@@ -194,6 +201,9 @@ PS Club Web — DirectAdmin quraşdırma
 
 4) Brauzerdə açın: https://$WebDomain
 
+5) İlk dəfə: F12 → Application → Service Workers → Unregister
+   Local Storage → ps.sayt.cam → Clear → Ctrl+Shift+R
+
 "@ | Set-Content -Path $Path -Encoding UTF8
     }
 }
@@ -201,9 +211,22 @@ PS Club Web — DirectAdmin quraşdırma
 function New-SpaHtaccess([string]$Dir) {
     @"
 RewriteEngine On
+
+# Köhnə Flutter SW — Chrome-da donmuş köhnə bundle qaytarır
+RewriteRule ^flutter_service_worker\.js$ - [G,L]
+
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^ index.html [L]
+
+# Flutter veb — index və bootstrap keşlənməsin (köhnə JS qalmasın)
+<IfModule mod_headers.c>
+  <FilesMatch "^(index\.html|flutter_bootstrap\.js|main\.dart\.js)$">
+    Header set Cache-Control "no-cache, no-store, must-revalidate"
+    Header set Pragma "no-cache"
+    Header set Expires "0"
+  </FilesMatch>
+</IfModule>
 "@ | Set-Content -Path (Join-Path $Dir '.htaccess') -Encoding ASCII
 }
 
@@ -286,8 +309,6 @@ New-Item -ItemType Directory -Path $DistDir -Force | Out-Null
 New-Item -ItemType Directory -Path $BackendOut -Force | Out-Null
 New-Item -ItemType Directory -Path $FrontendOut -Force | Out-Null
 
-$JwtSecret = New-RandomSecret 56
-
 # ─── BACKEND ─────────────────────────────────────────────────────────────────
 Write-Step 'Backend: composer install (--no-dev)'
 Push-Location $BackendDir
@@ -298,14 +319,6 @@ try {
     Pop-Location
 }
 
-Write-Step 'Backend: migration + seed + install.sql (PHP)'
-$installSqlDir = Join-Path $BackendOut 'database'
-New-Item -ItemType Directory -Path $installSqlDir -Force | Out-Null
-$installSql = Join-Path $installSqlDir 'install.sql'
-
-$generateSql = Join-Path $BackendDir 'scripts\generate-install-sql.php'
-Invoke-Checked -Exe $PhpExe -CommandArgs @($generateSql, $TempDbName, $installSql) -WorkDir $BackendDir -Label 'generate-install-sql.php'
-
 Write-Step 'Backend: DirectAdmin strukturuna yığılır'
 $siteRoot = Join-Path $BackendOut 'site-root'
 $publicHtml = Join-Path $BackendOut 'public_html'
@@ -315,29 +328,29 @@ New-Item -ItemType Directory -Path $publicHtml -Force | Out-Null
 Copy-BackendTree -DestRoot $siteRoot
 Copy-Item (Join-Path $BackendDir 'vendor') (Join-Path $siteRoot 'vendor') -Recurse -Force
 Copy-Item (Join-Path $BackendDir 'public\*') $publicHtml -Recurse -Force
+Get-ChildItem -Path $publicHtml -Filter '*.php' -File | Where-Object {
+    $Script:BackendPublicSetupExclude -contains $_.Name
+} | Remove-Item -Force
 
-# database/ — install.sql istisna (lokal köhnə fayl zip-ə düşməsin)
+# database/ — install.sql və setup.php zip-ə daxil deyil
 $dbInSite = Join-Path $siteRoot 'database'
 if (Test-Path $dbInSite) { Remove-Item $dbInSite -Recurse -Force }
 New-Item -ItemType Directory -Path $dbInSite -Force | Out-Null
 Get-ChildItem (Join-Path $BackendDir 'database') -Force | Where-Object {
-    $_.Name -ne 'install.sql'
+    $Script:BackendDatabaseExclude -notcontains $_.Name
 } | ForEach-Object {
     Copy-Item $_.FullName (Join-Path $dbInSite $_.Name) -Recurse -Force
 }
-Copy-Item $installSql (Join-Path $dbInSite 'install.sql') -Force
-if (Test-Path (Join-Path $BackendDir 'database\install.sql')) {
-    Remove-Item (Join-Path $BackendDir 'database\install.sql') -Force -ErrorAction SilentlyContinue
-}
 
 New-StoragePlaceholders -SiteRoot $siteRoot
-Write-ProductionEnv -Path (Join-Path $siteRoot '.env') -JwtSecret $JwtSecret
 
 # Asan upload: hamısı bir public_html-də
 $publicHtmlFull = Join-Path $BackendOut 'public_html_FULL'
 New-Item -ItemType Directory -Path $publicHtmlFull -Force | Out-Null
 Copy-Item (Join-Path $siteRoot '*') $publicHtmlFull -Recurse -Force
 Copy-Item (Join-Path $publicHtml '*') $publicHtmlFull -Recurse -Force
+
+Remove-BackendSetupFiles -Roots @($publicHtml, $publicHtmlFull, $siteRoot)
 
 Write-DeployReadme -Path (Join-Path $BackendOut 'OXU-BUNU.txt') -Kind 'backend'
 
@@ -357,8 +370,20 @@ Invoke-Checked -Exe $FlutterExe -CommandArgs @('pub', 'get') -WorkDir $FrontendD
 Write-Step "Frontend: flutter build web (API_URL=$ApiBaseUrl)"
 Invoke-Checked -Exe $FlutterExe -CommandArgs @(
     'build', 'web', '--release',
-    "--dart-define=API_URL=$ApiBaseUrl"
+    "--dart-define=API_URL=$ApiBaseUrl",
+    '--pwa-strategy=none'
 ) -WorkDir $FrontendDir -Label 'flutter build web'
+
+# Service worker tam söndür (köhnə cache qalmasın)
+$bootstrap = Join-Path $FrontendDir 'build\web\flutter_bootstrap.js'
+if (Test-Path $bootstrap) {
+    $js = Get-Content $bootstrap -Raw -Encoding UTF8
+    $js = $js -replace ',\s*serviceWorkerSettings:\s*\{[^}]*\}', ''
+    $js = $js -replace 'serviceWorkerSettings:\s*\{[^}]*\},?\s*', ''
+    Set-Content -Path $bootstrap -Value $js -Encoding UTF8 -NoNewline
+}
+$sw = Join-Path $FrontendDir 'build\web\flutter_service_worker.js'
+if (Test-Path $sw) { Remove-Item $sw -Force }
 
 $webBuild = Join-Path $FrontendDir 'build\web'
 if (-not (Test-Path (Join-Path $webBuild 'index.html'))) {
@@ -369,6 +394,8 @@ Write-Step 'Frontend: public_html + .htaccess'
 $fePublic = Join-Path $FrontendOut 'public_html'
 New-Item -ItemType Directory -Path $fePublic -Force | Out-Null
 Copy-Item (Join-Path $webBuild '*') $fePublic -Recurse -Force
+$swFile = Join-Path $fePublic 'flutter_service_worker.js'
+if (Test-Path $swFile) { Remove-Item $swFile -Force }
 New-SpaHtaccess -Dir $fePublic
 Write-DeployReadme -Path (Join-Path $FrontendOut 'OXU-BUNU.txt') -Kind 'frontend'
 

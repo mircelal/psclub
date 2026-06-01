@@ -9,6 +9,8 @@ use App\Modules\Shifts\ShiftService;
 use App\Support\BillingCalculator;
 use App\Support\Database;
 use App\Support\DatabaseClock;
+use App\Support\CustomerGroupService;
+use App\Support\PromotionService;
 use DI\ContainerBuilder;
 use Monolog\Handler\StreamHandler;
 use Monolog\Logger;
@@ -37,6 +39,11 @@ $builder->addDefinitions([
     AuditService::class => fn (\Psr\Container\ContainerInterface $c) => new AuditService($c->get(PDO::class)),
     ReceiptService::class => fn (\Psr\Container\ContainerInterface $c) => new ReceiptService($c->get(PDO::class)),
     ShiftService::class => fn (\Psr\Container\ContainerInterface $c) => new ShiftService($c->get(PDO::class)),
+    CustomerGroupService::class => fn (\Psr\Container\ContainerInterface $c) => new CustomerGroupService($c->get(PDO::class)),
+    PromotionService::class => fn (\Psr\Container\ContainerInterface $c) => new PromotionService(
+        $c->get(PDO::class),
+        $c->get(CustomerGroupService::class)
+    ),
 ]);
 
 return $builder->build();

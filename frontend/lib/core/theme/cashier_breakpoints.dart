@@ -45,6 +45,21 @@ class CashierBreakpoints {
         CashierLayoutSize.desktop => CashierTopBarLayout.desktop,
       };
 
-  double get contentPaddingH => isMobile ? 8.0 : (isTablet ? 12.0 : 16.0);
-  double get contentPaddingV => isMobile ? 8.0 : (isTablet ? 10.0 : 12.0);
+  double get contentPaddingH => isMobile ? 10.0 : (isTablet ? 12.0 : 16.0);
+  double get contentPaddingV => isMobile ? 6.0 : (isTablet ? 10.0 : 12.0);
+
+  /// Mobil kassir — kompakt üst panel, böyük toxunma zonası.
+  bool get useCompactCashierChrome => isMobile || width < 720;
+
+  /// Dar telefon — tək sütun masa grid.
+  bool get isNarrowPhone => width < 360;
+
+  /// Mobil masa sahəsi — əlavə çərçivə olmadan düz fon.
+  bool get useFlatTableCanvas => isMobile;
+
+  /// Grid-də 2 sütun (geniş telefon).
+  int get mobileTableColumns => isNarrowPhone ? 1 : 2;
+
+  /// F1/F5 və s. — yalnız planşet (klaviaturalı) və masaüstü.
+  bool get supportsKeyboardShortcuts => !isMobile;
 }

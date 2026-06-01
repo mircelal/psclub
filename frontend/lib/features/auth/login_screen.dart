@@ -1,7 +1,10 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/api/api_client.dart';
 import '../../core/auth/auth_state.dart';
+import '../../core/feedback/app_feedback.dart';
 import '../../core/config/business_config_provider.dart';
 import '../../core/widgets/business_logo.dart';
 import '../../core/theme/app_spacing.dart';
@@ -18,8 +21,8 @@ class LoginScreen extends ConsumerStatefulWidget {
 }
 
 class _LoginScreenState extends ConsumerState<LoginScreen> {
-  final _userCtrl = TextEditingController(text: 'admin');
-  final _passCtrl = TextEditingController(text: 'admin');
+  final _userCtrl = TextEditingController();
+  final _passCtrl = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _loading = false;
   bool _obscure = true;
@@ -27,12 +30,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+    if (!kIsWeb) await AppFeedback.unlock();
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
       await ref.read(authProvider.notifier).login(_userCtrl.text.trim(), _passCtrl.text);
+      if (!kIsWeb) AppFeedback.success();
     } on DioException catch (e) {
       final msg = e.response?.data;
       if (msg is Map && msg['message'] != null) {
@@ -43,7 +48,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         setState(() => _error = e.message ?? 'Giriş uğursuz oldu');
       }
     } catch (e) {
-      setState(() => _error = 'İstifadəçi adı və ya şifrə yanlışdır ($e)');
+      setState(() => _error = ApiClient.messageFromError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -51,48 +56,32 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final biz = ref.watch(businessConfigProvider).valueOrNull ?? BusinessConfig.fallback;
+    final biz = ref.watch(businessConfigProvider.select((a) => a.valueOrNull)) ?? BusinessConfig.fallback;
 
     return Theme(
       data: AppTheme.light,
       child: Scaffold(
-        backgroundColor: BrandColors.navyDark,
-        body: Stack(
-          children: [
-            Positioned.fill(
-              child: DecoratedBox(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      BrandColors.navyDark,
-                      BrandColors.navy,
-                      Color(0xFF0A3270),
-                    ],
-                  ),
-                ),
-              ),
+        body: Container(
+          width: double.infinity,
+          height: double.infinity,
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                BrandColors.navyDark,
+                BrandColors.navy,
+                Color(0xFF0A3270),
+              ],
             ),
-            Positioned(
-              top: -120,
-              right: -80,
-              child: Container(
-                width: 320,
-                height: 320,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: BrandColors.brightBlue.withValues(alpha: 0.12),
-                ),
-              ),
-            ),
-            Center(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(AppSpacing.xxl),
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 420),
-                  child: Column(
-                    children: [
+          ),
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(AppSpacing.xxl),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: Column(
+                  children: [
                       const BusinessLogo(size: 72),
                       const SizedBox(height: AppSpacing.xxl),
                       Text(
@@ -147,9 +136,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               AppTextField(
                                 controller: _userCtrl,
                                 label: 'İstifadəçi adı',
-                                hint: 'admin',
                                 prefixIcon: Icons.person_outline,
-                                autofocus: true,
+                                autofocus: !kIsWeb,
                               ),
                               const SizedBox(height: AppSpacing.lg),
                               AppTextField(
@@ -203,21 +191,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           ),
                         ),
                       ),
-                      const SizedBox(height: AppSpacing.xl),
-                      Text(
-                        'Demo: admin / admin  •  kassir / kassir',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: BrandColors.textOnNavy.withValues(alpha: 0.55),
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
-                  ),
+                  ],
                 ),
               ),
             ),
-          ],
+          ),
         ),
       ),
     );

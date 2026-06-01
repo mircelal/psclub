@@ -6,7 +6,10 @@ namespace App\Modules\Tables;
 
 use App\Support\ApiResponse;
 use App\Support\BillingCalculator;
+use App\Support\BusinessBillingColumns;
 use App\Support\DatabaseClock;
+use App\Support\DiscountCalculator;
+use App\Support\PromotionService;
 use PDO;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -17,7 +20,8 @@ final class TablesController
     public function __construct(
         private readonly PDO $pdo,
         private readonly BillingCalculator $billing,
-        private readonly DatabaseClock $clock
+        private readonly DatabaseClock $clock,
+        private readonly PromotionService $promotions,
     ) {
     }
 
@@ -26,11 +30,16 @@ final class TablesController
         $this->syncTableStatusesFromSessions();
 
         $stmt = $this->pdo->query(
-            'SELECT t.*, s.id AS session_id, s.status AS session_status, s.opened_at,
+            'SELECT t.*, s.id AS session_id, s.status AS session_status, s.opened_at, s.updated_at AS session_updated_at,
                     s.planned_minutes, s.hourly_rate_snapshot AS session_hourly_rate,
                     s.tariff_name_snapshot AS session_tariff_name,
                     s.set_name_snapshot AS session_set_name,
-                    s.set_price_snapshot AS session_set_price
+                    s.set_price_snapshot AS session_set_price,
+                    s.discount_type AS session_discount_type,
+                    s.discount_value AS session_discount_value,
+                    s.discount_applies_to AS session_discount_applies_to,
+                    s.customer_id AS session_customer_id,
+                    s.session_type AS session_type
              FROM tables t
              LEFT JOIN sessions s ON s.table_id = t.id AND s.status IN (\'active\', \'paused\')
              WHERE t.is_active = 1
@@ -38,7 +47,12 @@ final class TablesController
         );
         $rows = $stmt->fetchAll();
         $tariffsByTable = $this->loadTariffsGrouped();
-        $biz = $this->pdo->query('SELECT billing_mode, billing_rounding, time_billing_enabled FROM businesses WHERE id = 1')->fetch();
+        $bizSelect = BusinessBillingColumns::selectSql($this->pdo, [
+            'billing_mode', 'billing_rounding', 'time_billing_enabled',
+        ]);
+        $biz = BusinessBillingColumns::withDefaults(
+            $this->pdo->query("SELECT {$bizSelect} FROM businesses WHERE id = 1")->fetch()
+        );
 
         foreach ($rows as &$row) {
             $row['tariffs'] = $tariffsByTable[(int) $row['id']] ?? [];
@@ -46,14 +60,23 @@ final class TablesController
                 $preview = $this->buildBillPreview((int) $row['session_id'], $row, $biz);
                 $row['bill_preview'] = $preview;
                 $row['session_items'] = $preview['items'] ?? [];
+                $row['active_promotion'] = $preview['active_promotion'] ?? null;
+                $row['active_customer_group'] = $preview['active_customer_group'] ?? null;
             }
         }
 
-        return ApiResponse::success($rows);
+        return ApiResponse::success([
+            'server_now' => $this->clock->nowIso(),
+            'tables' => $rows,
+        ]);
     }
 
     private function loadTariffsGrouped(): array
     {
+        if (!$this->hasTableTariffs()) {
+            return [];
+        }
+
         $stmt = $this->pdo->query(
             'SELECT id, table_id, name, hourly_rate, sort_order
              FROM table_tariffs
@@ -91,9 +114,6 @@ final class TablesController
         );
 
         $plannedMinutes = isset($tableRow['planned_minutes']) ? (int) $tableRow['planned_minutes'] : 0;
-        if ($plannedMinutes > 0) {
-            $activeSeconds = min($activeSeconds, $plannedMinutes * 60);
-        }
 
         $setPrice = (float) ($tableRow['session_set_price'] ?? 0);
         if ($setPrice > 0) {
@@ -107,12 +127,49 @@ final class TablesController
                     $activeSeconds,
                     $hourlyRate,
                     $biz['billing_mode'] ?? 'per_minute',
-                    (float) ($biz['billing_rounding'] ?? 0.01)
+                    (float) ($biz['billing_rounding'] ?? 0.01),
+                    max(1, (int) ($biz['min_billing_minutes'] ?? 60)),
+                    max(1, (int) ($biz['billing_increment_minutes'] ?? 30)),
+                    max(0, (int) ($biz['billing_grace_minutes'] ?? 10)),
+                    $plannedMinutes > 0 ? $plannedMinutes : null
                 )
                 : 0.0;
             $productsTotal = $this->billing->calculateProductsTotal($items);
         }
-        $total = round($timeCharge + $productsTotal, 2);
+        $subtotal = round($timeCharge + $productsTotal, 2);
+
+        $sessionRow = [
+            'session_type' => $tableRow['session_type'] ?? 'table',
+            'tariff_name_snapshot' => $tableRow['session_tariff_name'] ?? null,
+            'customer_id' => $tableRow['session_customer_id'] ?? null,
+            'discount_type' => $tableRow['session_discount_type'] ?? 'none',
+            'discount_value' => $tableRow['session_discount_value'] ?? 0,
+            'discount_applies_to' => $tableRow['session_discount_applies_to'] ?? 'time_only',
+            'business_id' => 1,
+        ];
+        $discountType = $sessionRow['discount_type'] ?? 'none';
+        $discountAppliesTo = $sessionRow['discount_applies_to'] ?? 'time_only';
+        $resolved = $this->promotions->resolveDiscount($sessionRow, $timeCharge, $productsTotal);
+        $discount = $resolved['amount'];
+        $promotion = $resolved['promotion'];
+        $customerGroup = $resolved['customer_group'];
+        $displayCustomerGroup = $this->promotions->displayCustomerGroup($sessionRow);
+        $promotionName = $promotion['name'] ?? null;
+        $discountLabel = $promotionName;
+        if ($discountType !== 'none') {
+            $base = $discountAppliesTo === 'time_only' ? $timeCharge : $subtotal;
+            $discount = DiscountCalculator::amount($base, (string) $discountType, (float) ($sessionRow['discount_value'] ?? 0));
+            $promotionName = null;
+            $promotion = null;
+            $customerGroup = null;
+            $discountLabel = null;
+        } elseif ($customerGroup !== null) {
+            $discountLabel = (string) $customerGroup['name'];
+            $promotionName = null;
+            $promotion = null;
+        }
+        $total = round($subtotal - $discount, 2);
+        $hasPackage = $setPrice > 0;
 
         $itemRows = array_map(static fn (array $i): array => [
             'product_name' => $i['product_name'],
@@ -124,10 +181,29 @@ final class TablesController
             'active_minutes' => (int) ceil($activeSeconds / 60),
             'time_charge' => $timeCharge,
             'products_total' => $productsTotal,
+            'subtotal' => $subtotal,
+            'discount' => $discount,
+            'promotion_name' => $promotionName,
+            'discount_label' => $discountLabel,
+            'promotion_discount_type' => $promotion ? (string) $promotion['discount_type'] : null,
+            'promotion_discount_value' => $promotion ? (float) $promotion['discount_value'] : null,
+            'active_promotion' => $promotion ? [
+                'id' => (int) $promotion['id'],
+                'name' => (string) $promotion['name'],
+                'discount_type' => (string) $promotion['discount_type'],
+                'discount_value' => (float) $promotion['discount_value'],
+            ] : null,
+            'customer_group_name' => $customerGroup ? (string) $customerGroup['name'] : null,
+            'customer_group_discount_type' => $customerGroup ? (string) $customerGroup['discount_type'] : null,
+            'customer_group_discount_value' => $customerGroup ? (float) $customerGroup['discount_value'] : null,
+            'customer_group_applies_to' => $customerGroup ? (string) ($customerGroup['applies_to'] ?? 'time_only') : null,
+            'active_customer_group' => $displayCustomerGroup,
             'total_amount' => $total,
             'planned_minutes' => $plannedMinutes > 0 ? $plannedMinutes : null,
             'remaining_seconds' => $plannedMinutes > 0 ? max(0, ($plannedMinutes * 60) - $activeSeconds) : null,
-            'is_countdown' => $plannedMinutes > 0,
+            'is_countdown' => !$hasPackage && $plannedMinutes > 0,
+            'is_package' => $hasPackage,
+            'computed_at' => $this->clock->nowIso(),
             'items' => $itemRows,
         ];
     }
@@ -289,9 +365,25 @@ final class TablesController
         );
     }
 
+    private function hasTableTariffs(): bool
+    {
+        static $ok = null;
+        if ($ok !== null) {
+            return $ok;
+        }
+        $stmt = $this->pdo->query("SHOW TABLES LIKE 'table_tariffs'");
+        $ok = (bool) $stmt->fetchColumn();
+
+        return $ok;
+    }
+
     /** @param list<array{name: string, hourly_rate: float, sort_order: int}> $tariffs */
     private function syncTariffs(int $tableId, array $tariffs): void
     {
+        if (!$this->hasTableTariffs()) {
+            return;
+        }
+
         $this->pdo->prepare('DELETE FROM table_tariffs WHERE table_id = ?')->execute([$tableId]);
         $stmt = $this->pdo->prepare(
             'INSERT INTO table_tariffs (table_id, name, hourly_rate, sort_order, is_active, created_at, updated_at)

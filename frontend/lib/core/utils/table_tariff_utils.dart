@@ -1,3 +1,4 @@
+import '../billing/effective_tariff_quote.dart';
 import 'json_parse.dart';
 
 class TableTariff {
@@ -21,16 +22,48 @@ List<TableTariff> parseTableTariffs(Map<String, dynamic> table) {
 }
 
 String formatTableTariffSummary(Map<String, dynamic> table) {
+  return formatEffectiveTariffSummary(table, const []);
+}
+
+/// Boş masa kartı və kassir paneli — endirimdən sonra saatlıq qiymət.
+String formatEffectiveTariffSummary(
+  Map<String, dynamic> table,
+  List<Map<String, dynamic>> activePromotions,
+) {
   final tariffs = parseTableTariffs(table);
   if (tariffs.isEmpty) {
-    return '${jsonToDouble(table['hourly_rate']).toStringAsFixed(2)} ₼/saat';
+    final rate = jsonToDouble(table['hourly_rate']);
+    final quote = quoteHourlyForTariff(
+      tariffName: '',
+      hourlyRate: rate,
+      activePromotions: activePromotions,
+    );
+    return quote.hasDiscount ? quote.effectiveLabel : '${rate.toStringAsFixed(2)} ₼/saat';
   }
   if (tariffs.length == 1) {
     final t = tariffs.first;
+    final quote = quoteHourlyForTariff(
+      tariffName: t.name,
+      hourlyRate: t.hourlyRate,
+      activePromotions: activePromotions,
+    );
+    if (quote.hasDiscount) {
+      return '${t.name}: ${quote.effectiveHourly.toStringAsFixed(2)} ₼/saat';
+    }
     return '${t.hourlyRate.toStringAsFixed(2)} ₼/saat · ${t.name}';
   }
-  final rates = tariffs.map((t) => t.hourlyRate).toList()..sort();
-  return '${rates.first.toStringAsFixed(0)}–${rates.last.toStringAsFixed(0)} ₼/saat · ${tariffs.length} tarif';
+  final parts = tariffs.map((t) {
+    final quote = quoteHourlyForTariff(
+      tariffName: t.name,
+      hourlyRate: t.hourlyRate,
+      activePromotions: activePromotions,
+    );
+    final price = quote.hasDiscount
+        ? quote.effectiveHourly.toStringAsFixed(2)
+        : t.hourlyRate.toStringAsFixed(2);
+    return '${t.name} $price₼';
+  });
+  return parts.join(' · ');
 }
 
 String? activeSessionTariffLabel(Map<String, dynamic> table) {

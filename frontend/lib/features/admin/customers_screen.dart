@@ -11,6 +11,7 @@ import '../../core/widgets/app_snackbar.dart';
 import '../../core/widgets/empty_state.dart';
 import '../../core/widgets/money_text.dart';
 import '../../services/pos_service.dart';
+import 'discounts_screen.dart';
 import 'customer_profile_screen.dart';
 import 'widgets/admin_page_layout.dart';
 
@@ -101,6 +102,11 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
     final phoneCtrl = TextEditingController(text: PhoneUtils.fieldValue(stored: customer?['phone'] as String?));
     final emailCtrl = TextEditingController(text: customer?['email'] as String? ?? '');
     final notesCtrl = TextEditingController(text: customer?['notes'] as String? ?? '');
+    List<dynamic> groups = [];
+    try {
+      groups = await ref.read(posServiceProvider).getActiveCustomerGroups();
+    } catch (_) {}
+    int? groupId = jsonToIntOrNull(customer?['customer_group_id']);
 
     final ok = await showAppDialog<bool>(
       context: context,
@@ -108,17 +114,37 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
       subtitle: 'Telefon: ${PhoneUtils.displayHint()}',
       icon: Icons.person_outline,
       maxWidth: 480,
-      body: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          AppTextField(controller: nameCtrl, label: 'Ad soyad', prefixIcon: Icons.badge_outlined),
-          const SizedBox(height: AppSpacing.lg),
-          PhoneTextField(controller: phoneCtrl),
-          const SizedBox(height: AppSpacing.lg),
-          AppTextField(controller: emailCtrl, label: 'E-poçt (istəyə bağlı)', prefixIcon: Icons.email_outlined),
-          const SizedBox(height: AppSpacing.lg),
-          AppTextField(controller: notesCtrl, label: 'Qeyd (istəyə bağlı)'),
-        ],
+      body: StatefulBuilder(
+        builder: (context, setDialogState) {
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AppTextField(controller: nameCtrl, label: 'Ad soyad', prefixIcon: Icons.badge_outlined),
+              const SizedBox(height: AppSpacing.lg),
+              PhoneTextField(controller: phoneCtrl),
+              const SizedBox(height: AppSpacing.lg),
+              AppTextField(controller: emailCtrl, label: 'E-poçt (istəyə bağlı)', prefixIcon: Icons.email_outlined),
+              const SizedBox(height: AppSpacing.lg),
+              if (groups.isNotEmpty) ...[
+                DropdownButtonFormField<int?>(
+                  value: groupId,
+                  decoration: const InputDecoration(labelText: 'Endirim qrupu (istəyə bağlı)'),
+                  items: [
+                    const DropdownMenuItem<int?>(value: null, child: Text('Qrup yoxdur')),
+                    for (final raw in groups)
+                      DropdownMenuItem<int?>(
+                        value: jsonToInt((raw as Map)['id']),
+                        child: Text(_groupPickerLabel(Map<String, dynamic>.from(raw))),
+                      ),
+                  ],
+                  onChanged: (v) => setDialogState(() => groupId = v),
+                ),
+                const SizedBox(height: AppSpacing.lg),
+              ],
+              AppTextField(controller: notesCtrl, label: 'Qeyd (istəyə bağlı)'),
+            ],
+          );
+        },
       ),
       actions: [
         OutlinedButton(onPressed: () => Navigator.pop(context, false), child: const Text('Ləğv')),
@@ -163,6 +189,7 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
           'phone': phone,
           if (email.isNotEmpty) 'email': email,
           if (notes.isNotEmpty) 'notes': notes,
+          'customer_group_id': groupId,
         });
       } else {
         await service.createCustomer({
@@ -170,6 +197,7 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
           'phone': phone,
           if (email.isNotEmpty) 'email': email,
           if (notes.isNotEmpty) 'notes': notes,
+          if (groupId != null) 'customer_group_id': groupId,
         });
       }
       await _load();
@@ -182,13 +210,37 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
     }
   }
 
+  String _groupPickerLabel(Map<String, dynamic> g) {
+    final type = g['discount_type'] as String? ?? 'percent';
+    final value = jsonToDouble(g['discount_value']);
+    final suffix = type == 'percent' ? '${value.toStringAsFixed(0)}%' : '${value.toStringAsFixed(2)} ₼';
+    return '${g['name']} ($suffix)';
+  }
+
   @override
   Widget build(BuildContext context) {
     return AdminPageLayout(
-      action: FilledButton.icon(
-        onPressed: () => _showForm(),
-        icon: const Icon(Icons.person_add, size: 20),
-        label: const Text('Müştəri əlavə et'),
+      action: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          OutlinedButton.icon(
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const DiscountsScreen(initialTab: DiscountAdminTab.customerGroups),
+                ),
+              );
+            },
+            icon: const Icon(Icons.groups_outlined, size: 20),
+            label: const Text('Qruplar'),
+          ),
+          const SizedBox(width: 8),
+          FilledButton.icon(
+            onPressed: () => _showForm(),
+            icon: const Icon(Icons.person_add, size: 20),
+            label: const Text('Müştəri əlavə et'),
+          ),
+        ],
       ),
       child: Column(
         children: [
@@ -263,7 +315,11 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
                               ),
                             ),
                             title: c['name'] as String? ?? '',
-                            subtitle: c['phone'] as String? ?? '',
+                            subtitle: [
+                              c['phone'] as String? ?? '',
+                              if ((c['customer_group_name'] as String?)?.isNotEmpty == true)
+                                c['customer_group_name'] as String,
+                            ].where((e) => e.isNotEmpty).join(' · '),
                             trailing: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [

@@ -13,7 +13,11 @@ date_default_timezone_set($_ENV['APP_TIMEZONE'] ?? 'Asia/Baku');
 
 $pdo = App\Support\Database::connect();
 $billing = new App\Support\BillingCalculator();
-$biz = $pdo->query('SELECT billing_mode, billing_rounding, time_billing_enabled FROM businesses WHERE id = 1')->fetch();
+$biz = $pdo->query(
+    'SELECT billing_mode, billing_rounding, time_billing_enabled,
+            min_billing_minutes, billing_increment_minutes, billing_grace_minutes
+     FROM businesses WHERE id = 1'
+)->fetch();
 
 $stmt = $pdo->query(
     "SELECT * FROM sessions WHERE status = 'closed' AND active_seconds = 0 AND closed_at > opened_at"
@@ -41,12 +45,17 @@ foreach ($rows as $session) {
 
     $isCounter = ($session['session_type'] ?? 'table') === 'counter';
     $timeBilling = !$isCounter && (!isset($biz['time_billing_enabled']) || (bool) $biz['time_billing_enabled']);
+    $plannedMinutes = isset($session['planned_minutes']) ? (int) $session['planned_minutes'] : 0;
     $timeCharge = $timeBilling
         ? $billing->calculateTimeCharge(
             $activeSeconds,
             (float) $session['hourly_rate_snapshot'],
             $biz['billing_mode'] ?? 'per_minute',
-            (float) ($biz['billing_rounding'] ?? 0.01)
+            (float) ($biz['billing_rounding'] ?? 0.01),
+            max(1, (int) ($biz['min_billing_minutes'] ?? 60)),
+            max(1, (int) ($biz['billing_increment_minutes'] ?? 30)),
+            max(0, (int) ($biz['billing_grace_minutes'] ?? 10)),
+            $plannedMinutes > 0 ? $plannedMinutes : null
         )
         : 0.0;
     $productsTotal = $billing->calculateProductsTotal($itemRows);

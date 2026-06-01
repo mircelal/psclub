@@ -40,40 +40,47 @@ class TablesLayout extends StatelessWidget {
   final void Function(int) onSession;
   final void Function(Map<String, dynamic> table, TapDownDetails details)? onTableContextMenu;
 
+  static const _scrollPhysics = BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics());
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final w = constraints.maxWidth;
         final bp = CashierBreakpoints.fromWidth(w);
-        final padding = EdgeInsets.all(bp.isMobile ? 10 : 16);
+        final padding = EdgeInsets.all(bp.isMobile ? 8 : 16);
         final spacing = bp.isMobile ? 8.0 : 12.0;
+        final listCompact = bp.isMobile;
 
         return switch (viewMode) {
           TableViewMode.list => ListView.separated(
+              physics: _scrollPhysics,
               padding: padding,
               itemCount: tables.length,
-              separatorBuilder: (_, __) => SizedBox(height: bp.isMobile ? 8 : 10),
+              separatorBuilder: (_, __) => SizedBox(height: bp.isMobile ? 6 : 10),
               itemBuilder: (_, i) => TableListTile(
                 table: tables[i],
                 tick: tick,
+                compact: listCompact,
                 onTap: () => _tap(tables[i]),
                 onSecondaryTap: (d) => _contextMenu(tables[i], d),
               ),
             ),
           TableViewMode.card => _buildGrid(
               width: w,
+              bp: bp,
               limits: _limitsForCard(bp),
               padding: padding,
               spacing: spacing,
-              compact: bp.isMobile,
+              forceCompact: bp.isMobile,
             ),
           TableViewMode.grid => _buildGrid(
               width: w,
+              bp: bp,
               limits: _limitsForGrid(bp),
               padding: padding,
               spacing: spacing,
-              compact: bp.isMobile || bp.isTablet,
+              forceCompact: bp.isMobile || bp.isTablet,
             ),
         };
       },
@@ -82,12 +89,12 @@ class TablesLayout extends StatelessWidget {
 
   _TableTileLimits _limitsForGrid(CashierBreakpoints bp) {
     return switch (bp.size) {
-      CashierLayoutSize.mobile => const _TableTileLimits(
-          maxWidth: 520,
-          minWidth: 140,
-          minColumns: 1,
-          maxColumns: 2,
-          aspectRatio: 0.82,
+      CashierLayoutSize.mobile => _TableTileLimits(
+          maxWidth: bp.isNarrowPhone ? 520 : 200,
+          minWidth: bp.isNarrowPhone ? 280 : 158,
+          minColumns: bp.mobileTableColumns,
+          maxColumns: bp.mobileTableColumns,
+          aspectRatio: bp.isNarrowPhone ? 0.88 : 0.80,
         ),
       CashierLayoutSize.tablet => const _TableTileLimits(
           maxWidth: 220,
@@ -108,12 +115,12 @@ class TablesLayout extends StatelessWidget {
 
   _TableTileLimits _limitsForCard(CashierBreakpoints bp) {
     return switch (bp.size) {
-      CashierLayoutSize.mobile => const _TableTileLimits(
+      CashierLayoutSize.mobile => _TableTileLimits(
           maxWidth: 520,
-          minWidth: 260,
+          minWidth: bp.isNarrowPhone ? 280 : 300,
           minColumns: 1,
           maxColumns: 1,
-          aspectRatio: 0.95,
+          aspectRatio: 0.90,
         ),
       CashierLayoutSize.tablet => const _TableTileLimits(
           maxWidth: 340,
@@ -136,6 +143,10 @@ class TablesLayout extends StatelessWidget {
   static int _columnCount(double innerWidth, double spacing, _TableTileLimits limits) {
     if (innerWidth <= 0) return limits.minColumns;
 
+    if (limits.minColumns == limits.maxColumns) {
+      return limits.minColumns;
+    }
+
     var cols = ((innerWidth + spacing) / (limits.maxWidth + spacing)).floor();
     cols = cols.clamp(limits.minColumns, limits.maxColumns);
 
@@ -143,7 +154,6 @@ class TablesLayout extends StatelessWidget {
     if (tileW < limits.minWidth && cols > limits.minColumns) {
       cols = ((innerWidth + spacing) / (limits.minWidth + spacing)).floor();
       cols = cols.clamp(limits.minColumns, limits.maxColumns);
-      tileW = (innerWidth - spacing * (cols - 1)) / cols;
     }
 
     return cols;
@@ -151,17 +161,19 @@ class TablesLayout extends StatelessWidget {
 
   Widget _buildGrid({
     required double width,
+    required CashierBreakpoints bp,
     required _TableTileLimits limits,
     required EdgeInsets padding,
     required double spacing,
-    required bool compact,
+    required bool forceCompact,
   }) {
     final inner = width - padding.horizontal;
     final cross = _columnCount(inner, spacing, limits);
     final tileW = cross > 0 ? (inner - spacing * (cross - 1)) / cross : inner;
-    final useCompact = compact || tileW < 195;
+    final useCompact = forceCompact || tileW < 195;
 
     return GridView.builder(
+      physics: _scrollPhysics,
       padding: padding,
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: cross,
@@ -174,6 +186,7 @@ class TablesLayout extends StatelessWidget {
         table: tables[i],
         tick: tick,
         compact: useCompact,
+        mobile: bp.isMobile,
         onTap: () => _tap(tables[i]),
         onSecondaryTap: (d) => _contextMenu(tables[i], d),
       ),

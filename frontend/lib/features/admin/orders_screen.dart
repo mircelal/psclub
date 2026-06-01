@@ -6,9 +6,11 @@ import '../../core/theme/app_palette.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/utils/json_parse.dart';
 import '../../core/widgets/app_dialog.dart';
+import '../../core/api/api_client.dart';
 import '../../core/widgets/app_snackbar.dart';
 import '../../core/widgets/money_text.dart';
-import '../../services/pos_service.dart';
+import '../../services/pos_service.dart' show posServiceProvider, productsProvider;
+import '../cashier/shift_provider.dart';
 import 'widgets/admin_page_layout.dart';
 
 class OrdersScreen extends ConsumerStatefulWidget {
@@ -252,6 +254,8 @@ class _OrderBillSummary extends StatelessWidget {
     final timeCharge = jsonToDouble(order['time_charge']);
     final productsTotal = jsonToDouble(order['products_total']);
     final discount = jsonToDouble(order['discount']);
+    final discountType = order['discount_type'] as String? ?? 'none';
+    final discountValue = jsonToDouble(order['discount_value']);
     final total = jsonToDouble(order['total_amount']);
     final seconds = jsonToInt(order['active_seconds']);
     final rate = jsonToDouble(order['hourly_rate_snapshot']);
@@ -268,7 +272,14 @@ class _OrderBillSummary extends StatelessWidget {
           if (timeCharge > 0 || seconds > 0)
             _row(context, 'Vaxt (${_OrderListTile._formatDuration(seconds)})', timeCharge, subtitle: rate > 0 ? '${rate.toStringAsFixed(2)} ₼/saat' : null),
           if (productsTotal > 0) _row(context, 'Məhsullar', productsTotal),
-          if (discount > 0) _row(context, 'Endirim', discount, valueColor: AppColors.danger, negative: true),
+          if (discount > 0)
+            _row(
+              context,
+              discountType == 'percent' ? 'Endirim (${discountValue.toStringAsFixed(0)}%)' : 'Endirim',
+              discount,
+              valueColor: AppColors.danger,
+              negative: true,
+            ),
           const Padding(
             padding: EdgeInsets.symmetric(vertical: AppSpacing.sm),
             child: Divider(height: 1),
@@ -356,9 +367,13 @@ class _OrderDetailRightColumn extends StatelessWidget {
     required this.isRefunded,
     required this.timeCtrl,
     required this.prodCtrl,
-    required this.discCtrl,
+    required this.discInputCtrl,
     required this.totalCtrl,
     required this.noteCtrl,
+    required this.discountMode,
+    required this.computedDiscount,
+    required this.discountAppliesTo,
+    required this.onDiscountModeChanged,
     required this.onRecalc,
   });
 
@@ -366,9 +381,13 @@ class _OrderDetailRightColumn extends StatelessWidget {
   final bool isRefunded;
   final TextEditingController timeCtrl;
   final TextEditingController prodCtrl;
-  final TextEditingController discCtrl;
+  final TextEditingController discInputCtrl;
   final TextEditingController totalCtrl;
   final TextEditingController noteCtrl;
+  final String discountMode;
+  final double computedDiscount;
+  final String discountAppliesTo;
+  final ValueChanged<String> onDiscountModeChanged;
   final VoidCallback onRecalc;
 
   @override
@@ -382,9 +401,13 @@ class _OrderDetailRightColumn extends StatelessWidget {
           _OrderAdjustSection(
             timeCtrl: timeCtrl,
             prodCtrl: prodCtrl,
-            discCtrl: discCtrl,
+            discInputCtrl: discInputCtrl,
             totalCtrl: totalCtrl,
             noteCtrl: noteCtrl,
+            discountMode: discountMode,
+            computedDiscount: computedDiscount,
+            discountAppliesTo: discountAppliesTo,
+            onDiscountModeChanged: onDiscountModeChanged,
             onRecalc: onRecalc,
           ),
         ],
@@ -401,9 +424,13 @@ class _OrderDetailSingleColumn extends StatelessWidget {
     required this.isRefunded,
     required this.timeCtrl,
     required this.prodCtrl,
-    required this.discCtrl,
+    required this.discInputCtrl,
     required this.totalCtrl,
     required this.noteCtrl,
+    required this.discountMode,
+    required this.computedDiscount,
+    required this.discountAppliesTo,
+    required this.onDiscountModeChanged,
     required this.onRecalc,
   });
 
@@ -413,9 +440,13 @@ class _OrderDetailSingleColumn extends StatelessWidget {
   final bool isRefunded;
   final TextEditingController timeCtrl;
   final TextEditingController prodCtrl;
-  final TextEditingController discCtrl;
+  final TextEditingController discInputCtrl;
   final TextEditingController totalCtrl;
   final TextEditingController noteCtrl;
+  final String discountMode;
+  final double computedDiscount;
+  final String discountAppliesTo;
+  final ValueChanged<String> onDiscountModeChanged;
   final VoidCallback onRecalc;
 
   @override
@@ -435,9 +466,13 @@ class _OrderDetailSingleColumn extends StatelessWidget {
           _OrderAdjustSection(
             timeCtrl: timeCtrl,
             prodCtrl: prodCtrl,
-            discCtrl: discCtrl,
+            discInputCtrl: discInputCtrl,
             totalCtrl: totalCtrl,
             noteCtrl: noteCtrl,
+            discountMode: discountMode,
+            computedDiscount: computedDiscount,
+            discountAppliesTo: discountAppliesTo,
+            onDiscountModeChanged: onDiscountModeChanged,
             onRecalc: onRecalc,
           ),
         ] else
@@ -547,18 +582,32 @@ class _OrderAdjustSection extends StatelessWidget {
   const _OrderAdjustSection({
     required this.timeCtrl,
     required this.prodCtrl,
-    required this.discCtrl,
+    required this.discInputCtrl,
     required this.totalCtrl,
     required this.noteCtrl,
+    required this.discountMode,
+    required this.computedDiscount,
+    required this.discountAppliesTo,
+    required this.onDiscountModeChanged,
     required this.onRecalc,
   });
 
   final TextEditingController timeCtrl;
   final TextEditingController prodCtrl;
-  final TextEditingController discCtrl;
+  final TextEditingController discInputCtrl;
   final TextEditingController totalCtrl;
   final TextEditingController noteCtrl;
+  final String discountMode;
+  final double computedDiscount;
+  final String discountAppliesTo;
+  final ValueChanged<String> onDiscountModeChanged;
   final VoidCallback onRecalc;
+
+  String get _discInputLabel => switch (discountMode) {
+        'percent' => 'Endirim faizi (%)',
+        'fixed' => 'Endirim məbləği (₼)',
+        _ => 'Endirim (₼)',
+      };
 
   @override
   Widget build(BuildContext context) {
@@ -575,14 +624,28 @@ class _OrderAdjustSection extends StatelessWidget {
         children: [
           Text('Düzəliş', style: Theme.of(context).textTheme.titleSmall),
           const SizedBox(height: AppSpacing.md),
+          SegmentedButton<String>(
+            segments: const [
+              ButtonSegment(value: 'percent', label: Text('Faiz %')),
+              ButtonSegment(value: 'fixed', label: Text('Məbləğ ₼')),
+              ButtonSegment(value: 'amount', label: Text('Birbaşa ₼')),
+            ],
+            selected: {discountMode},
+            onSelectionChanged: (s) => onDiscountModeChanged(s.first),
+          ),
+          const SizedBox(height: AppSpacing.md),
           LayoutBuilder(
             builder: (context, constraints) {
               final stacked = constraints.maxWidth < 420;
               final fields = [
-                AppTextField(controller: timeCtrl, label: 'Vaxt ₼', onSubmitted: (_) => onRecalc()),
-                AppTextField(controller: prodCtrl, label: 'Məhsul ₼', onSubmitted: (_) => onRecalc()),
-                AppTextField(controller: discCtrl, label: 'Endirim ₼', onSubmitted: (_) => onRecalc()),
-                AppTextField(controller: totalCtrl, label: 'Ümumi ₼'),
+                AppTextField(controller: timeCtrl, label: 'Vaxt ₼'),
+                AppTextField(controller: prodCtrl, label: 'Məhsul ₼'),
+                AppTextField(
+                  controller: discInputCtrl,
+                  label: _discInputLabel,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                ),
+                AppTextField(controller: totalCtrl, label: 'Ümumi ₼', readOnly: true),
               ];
               if (stacked) {
                 return Column(
@@ -615,10 +678,14 @@ class _OrderAdjustSection extends StatelessWidget {
               );
             },
           ),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton(onPressed: onRecalc, child: const Text('Ümumi yenidən hesabla')),
-          ),
+          if (computedDiscount > 0) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              'Hesablanan endirim: −${computedDiscount.toStringAsFixed(2)} ₼ '
+              '(${discountAppliesTo == 'time_only' ? 'yalnız vaxt' : 'vaxt + məhsul'})',
+              style: const TextStyle(color: AppColors.danger, fontWeight: FontWeight.w600, fontSize: 13),
+            ),
+          ],
           const SizedBox(height: AppSpacing.sm),
           AppTextField(controller: noteCtrl, label: 'Admin qeydi'),
         ],
@@ -664,45 +731,180 @@ class _OrderDetailDialog extends ConsumerStatefulWidget {
 class _OrderDetailDialogState extends ConsumerState<_OrderDetailDialog> {
   late final _timeCtrl = TextEditingController(text: jsonToDouble(widget.order['time_charge']).toStringAsFixed(2));
   late final _prodCtrl = TextEditingController(text: jsonToDouble(widget.order['products_total']).toStringAsFixed(2));
-  late final _discCtrl = TextEditingController(text: jsonToDouble(widget.order['discount']).toStringAsFixed(2));
+  late final _discInputCtrl = TextEditingController();
   late final _totalCtrl = TextEditingController(text: jsonToDouble(widget.order['total_amount']).toStringAsFixed(2));
   late final _noteCtrl = TextEditingController(text: widget.order['admin_note']?.toString() ?? '');
+  late String _discountMode;
+  late String _discountAppliesTo;
+  double _computedDiscount = 0;
   bool _restoreStock = true;
   bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _discountAppliesTo = widget.order['discount_applies_to'] as String? ?? 'time_only';
+    final type = widget.order['discount_type'] as String? ?? 'none';
+    final value = jsonToDouble(widget.order['discount_value']);
+    final discountAmt = jsonToDouble(widget.order['discount']);
+
+    if (type == 'percent') {
+      _discountMode = 'percent';
+      _discInputCtrl.text = value > 0 ? value.toStringAsFixed(0) : '';
+    } else if (type == 'fixed') {
+      _discountMode = 'fixed';
+      _discInputCtrl.text = value > 0 ? value.toStringAsFixed(2) : discountAmt.toStringAsFixed(2);
+    } else if (discountAmt > 0) {
+      _discountMode = 'amount';
+      _discInputCtrl.text = discountAmt.toStringAsFixed(2);
+    } else {
+      _discountMode = 'percent';
+      _discInputCtrl.text = '';
+    }
+
+    for (final c in [_timeCtrl, _prodCtrl, _discInputCtrl]) {
+      c.addListener(_recalcTotal);
+    }
+    _recalcTotal();
+  }
 
   @override
   void dispose() {
     _timeCtrl.dispose();
     _prodCtrl.dispose();
-    _discCtrl.dispose();
+    _discInputCtrl.dispose();
     _totalCtrl.dispose();
     _noteCtrl.dispose();
     super.dispose();
   }
 
+  double _discountBase() {
+    final t = double.tryParse(_timeCtrl.text.replaceAll(',', '.')) ?? 0;
+    final p = double.tryParse(_prodCtrl.text.replaceAll(',', '.')) ?? 0;
+    return _discountAppliesTo == 'time_only' ? t : (t + p);
+  }
+
+  double _computeDiscountAmount() {
+    final input = double.tryParse(_discInputCtrl.text.replaceAll(',', '.')) ?? 0;
+    if (input <= 0) return 0;
+
+    final base = _discountBase();
+    if (base <= 0) return 0;
+
+    if (_discountMode == 'percent') {
+      return (base * input / 100).clamp(0, base);
+    }
+    return input.clamp(0, base);
+  }
+
   void _recalcTotal() {
-    final t = double.tryParse(_timeCtrl.text) ?? 0;
-    final p = double.tryParse(_prodCtrl.text) ?? 0;
-    final d = double.tryParse(_discCtrl.text) ?? 0;
-    _totalCtrl.text = (t + p - d).toStringAsFixed(2);
+    final t = double.tryParse(_timeCtrl.text.replaceAll(',', '.')) ?? 0;
+    final p = double.tryParse(_prodCtrl.text.replaceAll(',', '.')) ?? 0;
+    final d = _computeDiscountAmount();
+    _computedDiscount = double.parse(d.toStringAsFixed(2));
+    _totalCtrl.text = (t + p - _computedDiscount).clamp(0, double.infinity).toStringAsFixed(2);
+    if (mounted) setState(() {});
+  }
+
+  void _onDiscountModeChanged(String mode) {
+    setState(() {
+      _discountMode = mode;
+      if (mode == 'percent') {
+        final type = widget.order['discount_type'] as String? ?? 'none';
+        if (type == 'percent') {
+          _discInputCtrl.text = jsonToDouble(widget.order['discount_value']).toStringAsFixed(0);
+        }
+      } else if (mode == 'fixed') {
+        _discInputCtrl.text = _computedDiscount.toStringAsFixed(2);
+      } else {
+        _discInputCtrl.text = _computedDiscount.toStringAsFixed(2);
+      }
+    });
+    _recalcTotal();
+  }
+
+  Map<String, dynamic> _adjustPayload() {
+    final input = double.tryParse(_discInputCtrl.text.replaceAll(',', '.')) ?? 0;
+    final payload = <String, dynamic>{
+      'time_charge': double.tryParse(_timeCtrl.text.replaceAll(',', '.')) ?? 0,
+      'products_total': double.tryParse(_prodCtrl.text.replaceAll(',', '.')) ?? 0,
+      'discount': _computedDiscount,
+      'total_amount': double.tryParse(_totalCtrl.text.replaceAll(',', '.')) ?? 0,
+      'admin_note': _noteCtrl.text.trim(),
+      'discount_applies_to': _discountAppliesTo,
+    };
+
+    if (_discountMode == 'percent') {
+      payload['discount_type'] = 'percent';
+      payload['discount_value'] = input;
+    } else if (_discountMode == 'fixed') {
+      payload['discount_type'] = 'fixed';
+      payload['discount_value'] = input;
+    } else {
+      payload['discount_type'] = 'fixed';
+      payload['discount_value'] = _computedDiscount;
+    }
+
+    return payload;
   }
 
   Future<void> _adjust() async {
     setState(() => _busy = true);
     try {
-      await ref.read(posServiceProvider).adjustOrder(jsonToInt(widget.order['id']), {
-        'time_charge': double.tryParse(_timeCtrl.text) ?? 0,
-        'products_total': double.tryParse(_prodCtrl.text) ?? 0,
-        'discount': double.tryParse(_discCtrl.text) ?? 0,
-        'total_amount': double.tryParse(_totalCtrl.text) ?? 0,
-        'admin_note': _noteCtrl.text.trim(),
-      });
+      await ref.read(posServiceProvider).adjustOrder(jsonToInt(widget.order['id']), _adjustPayload());
+      refreshCurrentShift(ref);
       if (mounted) {
         showAppSnackBar(context, 'Sifariş düzəldildi');
         widget.onChanged();
       }
     } catch (e) {
       if (mounted) showAppSnackBar(context, e.toString(), isError: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _delete() async {
+    final confirm = await showAppDialog<bool>(
+      context: context,
+      title: 'Sifarişi sil',
+      body: const Text(
+        'Sifariş tam silinəcək: növbə jurnalından və kassa gözlənilən məbləğindən çıxacaq, '
+        'məhsul stoku bərpa olunacaq. Davam edilsin?',
+      ),
+      actions: [
+        OutlinedButton(onPressed: () => Navigator.pop(context, false), child: const Text('Xeyr')),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, true),
+          style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+          child: const Text('Sil'),
+        ),
+      ],
+    );
+    if (confirm != true) return;
+
+    setState(() => _busy = true);
+    try {
+      final result = await ref.read(posServiceProvider).deleteOrder(jsonToInt(widget.order['id']), {
+        'restore_stock': _restoreStock,
+        'admin_note': _noteCtrl.text.trim(),
+      });
+      refreshCurrentShift(ref);
+      ref.invalidate(productsProvider);
+      if (mounted) {
+        var msg = 'Sifariş silindi';
+        final summary = result['delete_summary'] as Map<String, dynamic>?;
+        if (summary != null) {
+          final cash = jsonToDouble(summary['cash_removed']);
+          if (cash > 0) {
+            msg += ' — növbədən nağd: ${cash.toStringAsFixed(2)} ₼';
+          }
+        }
+        showAppSnackBar(context, msg);
+        widget.onChanged();
+      }
+    } catch (e) {
+      if (mounted) showAppSnackBar(context, ApiClient.messageFromError(e), isError: true);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -726,12 +928,23 @@ class _OrderDetailDialogState extends ConsumerState<_OrderDetailDialog> {
 
     setState(() => _busy = true);
     try {
-      await ref.read(posServiceProvider).refundOrder(jsonToInt(widget.order['id']), {
+      final result = await ref.read(posServiceProvider).refundOrder(jsonToInt(widget.order['id']), {
         'restore_stock': _restoreStock,
         'admin_note': _noteCtrl.text.trim(),
       });
+      refreshCurrentShift(ref);
       if (mounted) {
-        showAppSnackBar(context, 'Qaytarma qeydə alındı');
+        var msg = 'Qaytarma qeydə alındı';
+        final summary = result['refund_summary'] as Map<String, dynamic>?;
+        if (summary != null) {
+          final cash = jsonToDouble(summary['cash_refunded']);
+          final card = jsonToDouble(summary['card_refunded']);
+          if (cash > 0 || card > 0) {
+            msg += ' — nağd: ${cash.toStringAsFixed(2)} ₼';
+            if (card > 0) msg += ', kart: ${card.toStringAsFixed(2)} ₼';
+          }
+        }
+        showAppSnackBar(context, msg);
         widget.onChanged();
       }
     } catch (e) {
@@ -811,9 +1024,13 @@ class _OrderDetailDialogState extends ConsumerState<_OrderDetailDialog> {
                               isRefunded: isRefunded,
                               timeCtrl: _timeCtrl,
                               prodCtrl: _prodCtrl,
-                              discCtrl: _discCtrl,
+                              discInputCtrl: _discInputCtrl,
                               totalCtrl: _totalCtrl,
                               noteCtrl: _noteCtrl,
+                              discountMode: _discountMode,
+                              computedDiscount: _computedDiscount,
+                              discountAppliesTo: _discountAppliesTo,
+                              onDiscountModeChanged: _onDiscountModeChanged,
                               onRecalc: _recalcTotal,
                             ),
                           ),
@@ -826,9 +1043,13 @@ class _OrderDetailDialogState extends ConsumerState<_OrderDetailDialog> {
                         isRefunded: isRefunded,
                         timeCtrl: _timeCtrl,
                         prodCtrl: _prodCtrl,
-                        discCtrl: _discCtrl,
+                        discInputCtrl: _discInputCtrl,
                         totalCtrl: _totalCtrl,
                         noteCtrl: _noteCtrl,
+                        discountMode: _discountMode,
+                        computedDiscount: _computedDiscount,
+                        discountAppliesTo: _discountAppliesTo,
+                        onDiscountModeChanged: _onDiscountModeChanged,
                         onRecalc: _recalcTotal,
                       ),
               ),
@@ -843,7 +1064,7 @@ class _OrderDetailDialogState extends ConsumerState<_OrderDetailDialog> {
                       child: CheckboxListTile(
                         value: _restoreStock,
                         onChanged: (v) => setState(() => _restoreStock = v ?? true),
-                        title: const Text('Stoku bərpa et (qaytarma)', style: TextStyle(fontSize: 13)),
+                        title: const Text('Stoku bərpa et', style: TextStyle(fontSize: 13)),
                         contentPadding: EdgeInsets.zero,
                         controlAffinity: ListTileControlAffinity.leading,
                       ),
@@ -851,6 +1072,12 @@ class _OrderDetailDialogState extends ConsumerState<_OrderDetailDialog> {
                     OutlinedButton(
                       onPressed: _busy ? null : _refund,
                       child: const Text('Qaytarma'),
+                    ),
+                    const SizedBox(width: AppSpacing.md),
+                    OutlinedButton(
+                      onPressed: _busy ? null : _delete,
+                      style: OutlinedButton.styleFrom(foregroundColor: AppColors.danger),
+                      child: const Text('Sil'),
                     ),
                     const SizedBox(width: AppSpacing.md),
                     FilledButton(
@@ -867,5 +1094,32 @@ class _OrderDetailDialogState extends ConsumerState<_OrderDetailDialog> {
         ),
       ),
     );
+  }
+}
+
+/// Admin növbə jurnalından və digər yerlərdən sifariş detalları.
+Future<void> showAdminOrderDetailDialog(
+  BuildContext context,
+  WidgetRef ref,
+  int orderId, {
+  VoidCallback? onChanged,
+}) async {
+  try {
+    final order = await ref.read(posServiceProvider).getOrder(orderId);
+    if (!context.mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => _OrderDetailDialog(
+        order: order,
+        onChanged: () {
+          onChanged?.call();
+          Navigator.pop(ctx);
+        },
+      ),
+    );
+  } catch (e) {
+    if (context.mounted) {
+      showAppSnackBar(context, e.toString(), isError: true);
+    }
   }
 }

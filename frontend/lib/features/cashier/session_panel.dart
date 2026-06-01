@@ -5,15 +5,20 @@ import '../../core/billing/session_live_bill.dart';
 import '../../core/config/business_config_provider.dart';
 import '../../core/feedback/app_feedback.dart';
 import '../../core/utils/json_parse.dart';
+import '../../core/utils/package_session.dart';
 import '../../core/theme/app_palette.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/widgets/app_snackbar.dart';
 import '../../core/widgets/section_header.dart';
 import '../../core/widgets/status_badge.dart';
 import '../../services/pos_service.dart';
+import '../../core/widgets/customer_picker.dart';
 import 'close_session_dialog.dart';
+import 'session_sync_provider.dart';
+import 'widgets/session_discount_dialog.dart';
 import 'widgets/product_catalog_grid.dart';
 import 'widgets/session_cart_list.dart';
+import 'widgets/counter_unpaid_dialog.dart';
 import 'widgets/table_card.dart';
 
 class SessionPanel extends ConsumerStatefulWidget {
@@ -23,12 +28,14 @@ class SessionPanel extends ConsumerStatefulWidget {
     required this.onChanged,
     this.scrollController,
     this.isWideLayout = false,
+    this.lockUntilSettled = false,
   });
 
   final int sessionId;
   final VoidCallback onChanged;
   final ScrollController? scrollController;
   final bool isWideLayout;
+  final bool lockUntilSettled;
 
   @override
   ConsumerState<SessionPanel> createState() => _SessionPanelState();
@@ -43,32 +50,48 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
   bool _actionLoading = false;
   bool _itemBusy = false;
   Timer? _liveTimer;
+  Timer? _syncTimer;
   int _tick = 0;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(openSessionIdProvider.notifier).setOpen(widget.sessionId);
+    });
     _loadSession();
     _liveTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _tick++);
+    });
+    _syncTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      if (!_itemBusy && !_actionLoading) {
+        _loadSession(silent: true);
+      }
     });
   }
 
   @override
   void dispose() {
     _liveTimer?.cancel();
+    _syncTimer?.cancel();
+    ref.read(openSessionIdProvider.notifier).setOpen(null);
     super.dispose();
   }
 
   bool get _isCounter => (_session?['session_type'] ?? 'table') == 'counter';
+
+  bool get _mustSettleBeforeClose => widget.lockUntilSettled || _isCounter;
 
   SessionBillSnapshot? _liveBill() {
     if (_session == null) return null;
     final config = ref.read(businessConfigProvider).valueOrNull ?? BusinessConfig.fallback;
     return computeSessionLiveBill(
       _session!,
-      billingMode: config.billingMode,
+      billingMode: config.chargeBillingMode,
       timeBillingEnabled: !_isCounter && config.timeBillingEnabled,
+      minBillingMinutes: config.minBillingMinutes,
+      billingIncrementMinutes: config.billingIncrementMinutes,
+      billingGraceMinutes: config.billingGraceMinutes,
     );
   }
 
@@ -81,12 +104,17 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
     }
     try {
       final session = await ref.read(posServiceProvider).getSession(widget.sessionId);
-      if (mounted) {
-        setState(() {
-          _session = session;
-          _sessionLoading = false;
-        });
+      if (!mounted) return;
+      final prevUpdated = _session?['updated_at']?.toString();
+      final nextUpdated = session['updated_at']?.toString();
+      if (silent && prevUpdated != null && prevUpdated == nextUpdated) {
+        _mergeSessionPromotionFields(session);
+        return;
       }
+      setState(() {
+        _session = session;
+        _sessionLoading = false;
+      });
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -100,6 +128,35 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
   void _applySession(Map<String, dynamic> session) {
     setState(() => _session = session);
     widget.onChanged();
+  }
+
+  void _mergeSessionPromotionFields(Map<String, dynamic> session) {
+    if (_session == null) return;
+    final prevPreview = _session!['bill_preview'] as Map?;
+    final nextPreview = session['bill_preview'] as Map?;
+    final changed = _session!['active_promotion'] != session['active_promotion'] ||
+        _session!['active_customer_group'] != session['active_customer_group'] ||
+        prevPreview?['discount'] != nextPreview?['discount'] ||
+        prevPreview?['promotion_name'] != nextPreview?['promotion_name'] ||
+        prevPreview?['promotion_discount_type'] != nextPreview?['promotion_discount_type'] ||
+        prevPreview?['promotion_discount_value'] != nextPreview?['promotion_discount_value'] ||
+        _session!['customer_id'] != session['customer_id'] ||
+        _session!['customer_name'] != session['customer_name'];
+    if (!changed) return;
+
+    setState(() {
+      _session = Map<String, dynamic>.from(_session!)
+        ..['active_promotion'] = session['active_promotion']
+        ..['active_customer_group'] = session['active_customer_group']
+        ..['bill_preview'] = session['bill_preview']
+        ..['discount_type'] = session['discount_type']
+        ..['discount_value'] = session['discount_value']
+        ..['discount_applies_to'] = session['discount_applies_to']
+        ..['discount'] = session['discount']
+        ..['customer_id'] = session['customer_id']
+        ..['customer_name'] = session['customer_name']
+        ..['customer_phone'] = session['customer_phone'];
+    });
   }
 
   Future<void> _addProduct(Map<String, dynamic> product) async {
@@ -175,9 +232,49 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
     }
   }
 
+  bool _canExtendTime(SessionBillSnapshot live, BusinessConfig config) {
+    if (_session != null && sessionHasPackage(_session!)) return false;
+    if (_isCounter || !live.isCountdown) return false;
+    final minSec = config.minOpenMinutes * 60;
+    final firstHourDone = live.activeSeconds >= minSec;
+    final expired = (live.remainingSeconds ?? 1) <= 0;
+    return firstHourDone || expired;
+  }
+
+  Future<void> _extendTime() async {
+    final config = ref.read(businessConfigProvider).valueOrNull ?? BusinessConfig.fallback;
+    setState(() => _actionLoading = true);
+    try {
+      final session = await ref.read(posServiceProvider).extendSession(
+            widget.sessionId,
+            addMinutes: config.extendStepMinutes,
+          );
+      if (mounted) setState(() => _session = session);
+      widget.onChanged();
+      AppFeedback.success();
+      if (mounted) {
+        showAppSnackBar(context, 'Müddət ${config.extendStepMinutes} dəq uzadıldı');
+      }
+    } catch (e) {
+      AppFeedback.error();
+      if (mounted) showAppSnackBar(context, e.toString(), isError: true);
+    } finally {
+      if (mounted) setState(() => _actionLoading = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
+
+    ref.listen<Map<int, String>>(sessionRevisionProvider, (prev, next) {
+      final rev = next[widget.sessionId];
+      if (rev == null) return;
+      if (prev?[widget.sessionId] == rev) return;
+      if (!_itemBusy && !_actionLoading) {
+        _loadSession(silent: true);
+      }
+    });
 
     final Widget body;
     if (_sessionLoading) {
@@ -262,10 +359,14 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
             controller: scrollCtrl,
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxl),
             children: [
+              if (_mustSettleBeforeClose && _items.isNotEmpty) _unpaidBanner(p),
               _billAndActions(p),
               const SectionDivider(),
               const SectionHeader(title: 'Məhsul əlavə et', subtitle: 'Kartı seç — səbətə düşür'),
-              _productsSection(p, gridColumns: 3),
+              _productsSection(
+                p,
+                gridColumns: MediaQuery.sizeOf(context).width < 380 ? 2 : 3,
+              ),
               const SizedBox(height: AppSpacing.xl),
               _cartHeader(),
               SessionCartList(
@@ -311,11 +412,16 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
     final title = _isCounter
         ? (_session!['table_name'] as String? ?? 'Birbaşa satış')
         : (_session!['table_name'] as String? ?? 'Masa');
-    final subtitle = _isCounter
-        ? (customerName != null && customerName.isNotEmpty
-            ? '$customerName · ödənişdən sonra bağlanır'
-            : 'Tez satış · ödənişdən sonra bağlanır')
-        : 'Sessiya #${widget.sessionId}';
+    final String subtitle;
+    if (_isCounter) {
+      subtitle = customerName != null && customerName.isNotEmpty
+          ? '$customerName · ödənişdən sonra bağlanır'
+          : 'Tez satış · ödənişdən sonra bağlanır';
+    } else {
+      subtitle = customerName != null && customerName.isNotEmpty
+          ? '$customerName · Sessiya #${widget.sessionId}'
+          : 'Sessiya #${widget.sessionId}';
+    }
 
     return Padding(
       padding: EdgeInsets.fromLTRB(
@@ -351,6 +457,11 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
     final content = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (_mustSettleBeforeClose && _items.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(AppSpacing.xl, 0, AppSpacing.xl, AppSpacing.sm),
+            child: _unpaidBanner(p),
+          ),
         Padding(
           padding: const EdgeInsets.fromLTRB(AppSpacing.xl, 0, AppSpacing.xl, AppSpacing.md),
           child: _billAndActions(p),
@@ -410,12 +521,41 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
         BillSummaryCard(
           timeCharge: live.timeCharge,
           productsTotal: live.productsTotal,
+          discount: live.discount,
+          promotionName: live.promotionName,
           total: live.totalAmount,
           activeMinutes: live.activeMinutes,
-          timeLabel: !_isCounter && config.timeBillingEnabled && live.timeCharge > 0
-              ? '${config.labels.rateLabel} (${live.activeMinutes} dəq)'
-              : null,
+          timeLabel: sessionHasPackage(_session!)
+              ? (sessionPackageName(_session!) ?? 'Paket')
+              : (!_isCounter && config.timeBillingEnabled && live.timeCharge > 0
+                  ? '${config.labels.rateLabel} (${live.activeMinutes} dəq)'
+                  : null),
+          timeChargeLabel: sessionHasPackage(_session!) ? 'Paket' : null,
         ),
+        const SizedBox(height: AppSpacing.md),
+        _customerSection(),
+        if (!_isCounter) ...[
+          const SizedBox(height: AppSpacing.md),
+          OutlinedButton.icon(
+            onPressed: _actionLoading || _itemBusy ? null : _showDiscountDialog,
+            icon: const Icon(Icons.local_offer_outlined),
+            label: Text(live.discount > 0 ? 'Endirimi dəyiş' : 'Endirim'),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(double.infinity, _actionButtonHeight),
+            ),
+          ),
+        ],
+        if (_canExtendTime(live, config)) ...[
+          const SizedBox(height: AppSpacing.md),
+          OutlinedButton.icon(
+            onPressed: _actionLoading ? null : _extendTime,
+            icon: const Icon(Icons.more_time),
+            label: Text('+${config.extendStepMinutes} dəq uzat'),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(double.infinity, _actionButtonHeight),
+            ),
+          ),
+        ],
         const SizedBox(height: AppSpacing.lg),
         Row(
           children: [
@@ -465,11 +605,162 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
     } catch (_) {}
   }
 
+  Future<void> _clearAllItems() async {
+    final items = List<Map<String, dynamic>>.from(
+      _items.map((e) => Map<String, dynamic>.from(e as Map)),
+    );
+    for (final item in items) {
+      final session = await ref.read(posServiceProvider).removeItem(
+            widget.sessionId,
+            jsonToInt(item['id']),
+          );
+      if (mounted) setState(() => _session = session);
+    }
+    widget.onChanged();
+  }
+
   Future<void> _closePanel() async {
+    if (_mustSettleBeforeClose && _items.isNotEmpty) {
+      final live = _liveBill();
+      final choice = await showCounterUnpaidDialog(
+        context,
+        itemCount: _items.length,
+        total: live?.totalAmount ?? _productsTotal,
+      );
+      switch (choice) {
+        case CounterUnpaidChoice.pay:
+          await _closeSession();
+          return;
+        case CounterUnpaidChoice.clearCart:
+          final confirm = await showDialog<bool>(
+            context: context,
+            barrierDismissible: false,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Səbəti boşalt?'),
+              content: const Text(
+                'Bütün məhsullar səbətdən silinəcək və satış ləğv olunacaq. '
+                'Bu əməliyyatı təsdiqləyin.',
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Xeyr')),
+                FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Bəli, boşalt')),
+              ],
+            ),
+          );
+          if (confirm != true || !mounted) return;
+          setState(() => _itemBusy = true);
+          try {
+            await _clearAllItems();
+            await _voidEmptyCounterIfNeeded();
+          } finally {
+            if (mounted) setState(() => _itemBusy = false);
+          }
+          if (mounted) Navigator.pop(context);
+          return;
+        case CounterUnpaidChoice.cancel:
+        case null:
+          return;
+      }
+    }
+
     if (_isCounter && _items.isEmpty) {
       await _voidEmptyCounterIfNeeded();
     }
     if (mounted) Navigator.pop(context);
+  }
+
+  Widget _unpaidBanner(AppPalette p) {
+    final live = _liveBill();
+    final total = live?.totalAmount ?? _productsTotal;
+    return Container(
+      margin: const EdgeInsets.only(bottom: AppSpacing.md),
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.errorContainer.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        border: Border.all(color: Theme.of(context).colorScheme.error.withValues(alpha: 0.45)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.info_outline, color: Theme.of(context).colorScheme.error, size: 22),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Text(
+              'Ödəniş mütləqdir (${total.toStringAsFixed(2)} ₼). '
+              'Bağlamaq üçün «Ödənişi al» düyməsini basın.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _customerSection() {
+    final customerId = jsonToInt(_session!['customer_id'], 0);
+    return CustomerPicker(
+      pos: ref.read(posServiceProvider),
+      selectedId: customerId > 0 ? customerId : null,
+      onChanged: _actionLoading || _itemBusy
+          ? null
+          : (id) {
+              _assignCustomer(id);
+            },
+    );
+  }
+
+  Future<void> _assignCustomer(int? customerId) async {
+    if (_actionLoading || _itemBusy) return;
+    setState(() => _actionLoading = true);
+    try {
+      final session = await ref.read(posServiceProvider).assignSessionCustomer(
+            widget.sessionId,
+            customerId: customerId,
+          );
+      _applySession(session);
+      AppFeedback.success();
+    } catch (e) {
+      AppFeedback.error();
+      if (mounted) showAppSnackBar(context, e.toString(), isError: true);
+    } finally {
+      if (mounted) setState(() => _actionLoading = false);
+    }
+  }
+
+  Future<void> _showDiscountDialog() async {
+    final live = _liveBill();
+    if (live == null) return;
+    final result = await showSessionDiscountDialog(
+      context,
+      timeCharge: live.timeCharge,
+      productsTotal: live.productsTotal,
+      currentDiscount: live.discount,
+      discountType: live.discountType,
+      discountValue: live.discountValue,
+    );
+    if (result == null || !mounted) return;
+
+    setState(() => _actionLoading = true);
+    try {
+      if (result.clear) {
+        final session = await ref.read(posServiceProvider).clearSessionDiscount(widget.sessionId);
+        _applySession(session);
+      } else {
+        final session = await ref.read(posServiceProvider).setSessionDiscount(
+              widget.sessionId,
+              discountType: result.discountType!,
+              discountValue: result.discountValue ?? 0,
+              discountAppliesTo: 'time_only',
+            );
+        _applySession(session);
+      }
+      AppFeedback.success();
+    } catch (e) {
+      AppFeedback.error();
+      if (mounted) showAppSnackBar(context, e.toString(), isError: true);
+    } finally {
+      if (mounted) setState(() => _actionLoading = false);
+    }
   }
 
   Future<void> _closeSession() async {

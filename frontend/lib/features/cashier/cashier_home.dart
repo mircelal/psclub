@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/auth/auth_state.dart';
 import '../../core/config/business_config_provider.dart';
+import '../../core/layout/mobile_ui.dart';
 import '../../core/settings/app_settings.dart';
 import '../../core/settings/ui_settings_sheet.dart';
 import '../../core/theme/cashier_breakpoints.dart';
@@ -43,6 +44,7 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   Timer? _pollTimer;
   Timer? _tickTimer;
+  Timer? _configPollTimer;
   int _tick = 0;
   CashierTableFilter _filter = CashierTableFilter.all;
   bool _shiftGateShown = false;
@@ -56,9 +58,14 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
     });
     _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) {
       ref.read(tablesProvider.notifier).refresh();
+      refreshCurrentShift(ref);
     });
     _tickTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _tick++);
+    });
+    _configPollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      ref.invalidate(productsProvider);
+      ref.invalidate(businessConfigProvider);
     });
   }
 
@@ -66,6 +73,7 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
   void dispose() {
     _pollTimer?.cancel();
     _tickTimer?.cancel();
+    _configPollTimer?.cancel();
     super.dispose();
   }
 
@@ -92,6 +100,7 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
 
   void _onSessionChanged() {
     ref.read(tablesProvider.notifier).refresh();
+    refreshCurrentShift(ref);
   }
 
   Future<void> _showSession(int sessionId) async {
@@ -108,7 +117,13 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
     try {
       final session = await ref.read(posServiceProvider).openCounterSale(customerId: result.customerId);
       if (!mounted) return;
-      showSessionPanel(context, ref, session['id'] as int, _onSessionChanged);
+      showSessionPanel(
+        context,
+        ref,
+        session['id'] as int,
+        _onSessionChanged,
+        lockUntilSettled: true,
+      );
       _onSessionChanged();
     } catch (e) {
       if (mounted) showAppSnackBar(context, e.toString(), isError: true);
@@ -185,11 +200,50 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
       if (t['session_id'] == null) continue;
       sum += tableLiveBillTotal(
         t,
-        billingMode: biz.billingMode,
+        billingMode: biz.chargeBillingMode,
         timeBillingEnabled: biz.timeBillingEnabled,
+        minBillingMinutes: biz.minBillingMinutes,
+        billingIncrementMinutes: biz.billingIncrementMinutes,
+        billingGraceMinutes: biz.billingGraceMinutes,
       );
     }
     return sum;
+  }
+
+  Widget _buildTablesArea({
+    required List<dynamic>? tablesList,
+    required AsyncValue<List<dynamic>> tablesAsync,
+    required TableViewMode viewMode,
+  }) {
+    if (tablesList == null) {
+      return tablesAsync.when(
+        loading: () => Center(
+          child: SizedBox(
+            width: 28,
+            height: 28,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.5,
+              color: CashierTheme.accent(context),
+            ),
+          ),
+        ),
+        error: (e, _) => EmptyState(
+          icon: Icons.cloud_off_outlined,
+          title: 'Serverə qoşulmaq olmur',
+          subtitle: e.toString(),
+          action: FilledButton.icon(
+            onPressed: () => ref.read(tablesProvider.notifier).refresh(),
+            icon: const Icon(Icons.refresh),
+            label: const Text('Yenidən cəhd et'),
+          ),
+        ),
+        data: (_) => const SizedBox.shrink(),
+      );
+    }
+    return _buildTablesGrid(
+      tablesList.cast<Map<String, dynamic>>(),
+      viewMode: viewMode,
+    );
   }
 
   Widget _buildTablesGrid(
@@ -226,7 +280,13 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
     final tablesAsync = ref.watch(tablesProvider);
     final tablesList = tablesAsync.valueOrNull;
     final uiSettings = ref.watch(appSettingsProvider).valueOrNull;
-    final viewMode = uiSettings?.tableViewMode ?? TableViewMode.grid;
+    final width = MediaQuery.sizeOf(context).width;
+    final bp = CashierBreakpoints.fromWidth(width);
+    final viewMode = effectiveTableViewMode(
+      uiSettings?.tableViewMode ?? TableViewMode.grid,
+      width,
+      isMobile: bp.isMobile,
+    );
     final biz = ref.watch(businessConfigProvider).valueOrNull ?? BusinessConfig.fallback;
 
     final list = tablesList?.cast<Map<String, dynamic>>() ?? [];
@@ -270,14 +330,19 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
           if (inDrawer) _scaffoldKey.currentState?.closeDrawer();
         },
         onRefresh: _refresh,
-        onSettings: () {
-          showUiSettingsSheet(context);
+        onSettings: () async {
           if (inDrawer) _scaffoldKey.currentState?.closeDrawer();
+          await showUiSettingsSheet(context);
+          ref.invalidate(businessConfigProvider);
+          _refresh();
         },
-        onShowShortcuts: () {
-          showCashierShortcutsDialog(context, showAdmin: isAdmin);
-          if (inDrawer) _scaffoldKey.currentState?.closeDrawer();
-        },
+        onShowShortcuts: bp.supportsKeyboardShortcuts
+            ? () {
+                showCashierShortcutsDialog(context, showAdmin: isAdmin);
+                if (inDrawer) _scaffoldKey.currentState?.closeDrawer();
+              }
+            : null,
+        showKeyboardShortcuts: bp.supportsKeyboardShortcuts,
         onAdmin: isAdmin
             ? () {
                 context.go('/admin');
@@ -292,7 +357,8 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
       final padH = bp.contentPaddingH;
       final padT = bp.contentPaddingV;
 
-      return ColoredBox(
+      return cashierSafeArea(
+        child: ColoredBox(
         color: CashierTheme.surfaceMain(context),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -301,27 +367,34 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
               biz: biz,
               liveRevenue: revenue,
               activeCount: active,
+              emptyCount: empty,
               totalCount: list.length,
               onCounterSale: blockSales ? _handleOpenShift : _startCounterSale,
-              onShowShortcuts: () => showCashierShortcutsDialog(context, showAdmin: isAdmin),
+              onShowShortcuts: bp.supportsKeyboardShortcuts
+                  ? () => showCashierShortcutsDialog(context, showAdmin: isAdmin)
+                  : null,
+              onRefresh: _refresh,
               onMenuTap: bp.showDrawer ? () => _scaffoldKey.currentState?.openDrawer() : null,
               layout: bp.topBarLayout,
             ),
             if (bp.showDrawer) ...[
-              Padding(
-                padding: EdgeInsets.fromLTRB(padH, 8, padH, 0),
-                child: CashierStatsRow(
-                  active: active,
-                  empty: empty,
-                  total: list.length,
-                  liveRevenue: revenue,
+              if (!bp.isMobile)
+                Padding(
+                  padding: EdgeInsets.fromLTRB(padH, 8, padH, 0),
+                  child: CashierStatsRow(
+                    active: active,
+                    empty: empty,
+                    total: list.length,
+                    liveRevenue: revenue,
+                    scrollable: false,
+                  ),
                 ),
-              ),
               CashierFilterBar(
                 filter: _filter,
                 onChanged: (f) => setState(() => _filter = f),
                 unitLabel: biz.labels.unitPlural,
-                horizontalScroll: bp.isMobile,
+                compact: bp.useCompactCashierChrome,
+                horizontalScroll: bp.isTablet,
               ),
             ],
             if (bp.isDesktop && !blockSales) CounterSaleToolbar(onNewSale: _startCounterSale),
@@ -329,54 +402,48 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
               child: blockSales
                   ? _ShiftBlockedWorkspace(onOpenShift: _handleOpenShift)
                   : Padding(
-                      padding: EdgeInsets.fromLTRB(padH, padT, padH, padH),
-                      child: DecoratedBox(
-                        decoration: CashierTheme.contentPanelDecoration(context),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(CashierTheme.radiusCard + 2),
-                          child: tablesList == null
-                              ? tablesAsync.when(
-                                  loading: () => Center(
-                                    child: SizedBox(
-                                      width: 28,
-                                      height: 28,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2.5,
-                                        color: CashierTheme.accent(context),
-                                      ),
-                                    ),
-                                  ),
-                                  error: (e, _) => EmptyState(
-                                    icon: Icons.cloud_off_outlined,
-                                    title: 'Serverə qoşulmaq olmur',
-                                    subtitle: e.toString(),
-                                    action: FilledButton.icon(
-                                      onPressed: () => ref.read(tablesProvider.notifier).refresh(),
-                                      icon: const Icon(Icons.refresh),
-                                      label: const Text('Yenidən cəhd et'),
-                                    ),
-                                  ),
-                                  data: (_) => const SizedBox.shrink(),
-                                )
-                              : _buildTablesGrid(
-                                  tablesList.cast<Map<String, dynamic>>(),
+                      padding: EdgeInsets.fromLTRB(
+                        bp.useFlatTableCanvas ? 0 : padH,
+                        padT,
+                        bp.useFlatTableCanvas ? 0 : padH,
+                        bp.useFlatTableCanvas ? 0 : padH,
+                      ),
+                      child: bp.useFlatTableCanvas
+                          ? _buildTablesArea(
+                              tablesList: tablesList,
+                              tablesAsync: tablesAsync,
+                              viewMode: viewMode,
+                            )
+                          : DecoratedBox(
+                              decoration: CashierTheme.contentPanelDecoration(context),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(CashierTheme.radiusCard + 2),
+                                child: _buildTablesArea(
+                                  tablesList: tablesList,
+                                  tablesAsync: tablesAsync,
                                   viewMode: viewMode,
                                 ),
-                        ),
-                      ),
+                              ),
+                            ),
                     ),
             ),
           ],
         ),
+      ),
       );
     }
 
     return CashierShortcutsScope(
+      enabled: bp.supportsKeyboardShortcuts,
       adminEnabled: isAdmin,
       onHelp: () => showCashierShortcutsDialog(context, showAdmin: isAdmin),
       onCounterSale: _startCounterSale,
       onRefresh: _refresh,
-      onSettings: () => showUiSettingsSheet(context),
+      onSettings: () async {
+        await showUiSettingsSheet(context);
+        ref.invalidate(businessConfigProvider);
+        _refresh();
+      },
       onFilter: (f) => setState(() => _filter = f),
       onTableSlot: _activateTableSlot,
       onAdmin: isAdmin ? () => context.go('/admin') : null,

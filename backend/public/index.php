@@ -14,6 +14,14 @@ require $appRoot . '/vendor/autoload.php';
 $dotenv = Dotenv\Dotenv::createImmutable($appRoot);
 $dotenv->safeLoad();
 
+$qaDbFile = $appRoot . '/.qa-db';
+if (is_file($qaDbFile)) {
+    $qaDb = trim((string) file_get_contents($qaDbFile));
+    if ($qaDb !== '') {
+        $_ENV['DB_NAME'] = $qaDb;
+    }
+}
+
 date_default_timezone_set($_ENV['APP_TIMEZONE'] ?? 'Asia/Baku');
 
 $container = require $appRoot . '/config/container.php';

@@ -11,6 +11,14 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 
 final class ReportsController
 {
+    private const NET_REVENUE_SUM = 'COALESCE(SUM(s.total_amount - CASE WHEN s.order_state = \'refunded\' THEN s.refund_amount ELSE 0 END), 0)';
+
+    private const REFUNDS_SUM = 'COALESCE(SUM(CASE WHEN s.order_state = \'refunded\' THEN s.refund_amount ELSE 0 END), 0)';
+
+    private const CLOSED_ORDER_WHERE = "s.status = 'closed' AND s.order_state != 'deleted'";
+
+    private const NOT_REFUNDED = " AND s.order_state != 'refunded' ";
+
     public function __construct(private readonly PDO $pdo)
     {
     }
@@ -29,8 +37,10 @@ final class ReportsController
                     COALESCE(SUM(time_charge), 0) AS time_revenue,
                     COALESCE(SUM(products_total), 0) AS products_revenue,
                     COALESCE(SUM(discount), 0) AS discount_total,
-                    COALESCE(SUM(total_amount), 0) AS total_revenue
-             FROM sessions WHERE status = 'closed' AND DATE(closed_at) = ?"
+                    COALESCE(SUM(total_amount), 0) AS gross_revenue,
+                    " . self::NET_REVENUE_SUM . " AS total_revenue,
+                    " . self::REFUNDS_SUM . " AS refunds_total
+             FROM sessions s WHERE " . self::CLOSED_ORDER_WHERE . " AND DATE(s.closed_at) = ?"
         );
         $sessions->execute([$date]);
         $summary = $sessions->fetch();
@@ -48,7 +58,7 @@ final class ReportsController
             "SELECT si.product_name, SUM(si.quantity) AS qty, SUM(si.quantity * si.unit_price) AS revenue
              FROM session_items si
              JOIN sessions s ON s.id = si.session_id
-             WHERE s.status = 'closed' AND DATE(s.closed_at) = ?
+             WHERE " . self::CLOSED_ORDER_WHERE . self::NOT_REFUNDED . " AND DATE(s.closed_at) = ?
              GROUP BY si.product_name ORDER BY revenue DESC"
         );
         $products->execute([$date]);
@@ -79,14 +89,15 @@ final class ReportsController
         $tables = $this->fetchTableRevenueBreakdown($from, $to);
 
         $daily = $this->pdo->prepare(
-            "SELECT DATE(closed_at) AS day,
+            "SELECT DATE(s.closed_at) AS day,
                     COUNT(*) AS sessions,
-                    SUM(total_amount) AS revenue,
-                    SUM(time_charge) AS time_revenue,
-                    SUM(products_total) AS products_revenue
-             FROM sessions
-             WHERE status = 'closed' AND DATE(closed_at) BETWEEN ? AND ?
-             GROUP BY DATE(closed_at) ORDER BY day"
+                    " . self::NET_REVENUE_SUM . " AS revenue,
+                    COALESCE(SUM(s.time_charge), 0) AS time_revenue,
+                    COALESCE(SUM(s.products_total), 0) AS products_revenue,
+                    " . self::REFUNDS_SUM . " AS refunds_total
+             FROM sessions s
+             WHERE " . self::CLOSED_ORDER_WHERE . " AND DATE(s.closed_at) BETWEEN ? AND ?
+             GROUP BY DATE(s.closed_at) ORDER BY day"
         );
         $daily->execute([$from, $to]);
 
@@ -94,7 +105,7 @@ final class ReportsController
             "SELECT si.product_name, SUM(si.quantity) AS qty, SUM(si.quantity * si.unit_price) AS revenue
              FROM session_items si
              JOIN sessions s ON s.id = si.session_id
-             WHERE s.status = 'closed' AND DATE(s.closed_at) BETWEEN ? AND ?
+             WHERE " . self::CLOSED_ORDER_WHERE . self::NOT_REFUNDED . " AND DATE(s.closed_at) BETWEEN ? AND ?
              GROUP BY si.product_name ORDER BY revenue DESC LIMIT 10"
         );
         $topProducts->execute([$from, $to]);
@@ -135,13 +146,15 @@ final class ReportsController
     {
         $stmt = $this->pdo->prepare(
             "SELECT COUNT(*) AS sessions_count,
-                    COALESCE(SUM(time_charge), 0) AS time_revenue,
-                    COALESCE(SUM(products_total), 0) AS products_revenue,
-                    COALESCE(SUM(discount), 0) AS discount_total,
-                    COALESCE(SUM(total_amount), 0) AS total_revenue,
-                    COALESCE(SUM(active_seconds), 0) AS total_seconds
-             FROM sessions
-             WHERE status = 'closed' AND DATE(closed_at) BETWEEN ? AND ?"
+                    COALESCE(SUM(s.time_charge), 0) AS time_revenue,
+                    COALESCE(SUM(s.products_total), 0) AS products_revenue,
+                    COALESCE(SUM(s.discount), 0) AS discount_total,
+                    COALESCE(SUM(s.total_amount), 0) AS gross_revenue,
+                    " . self::NET_REVENUE_SUM . " AS total_revenue,
+                    " . self::REFUNDS_SUM . " AS refunds_total,
+                    COALESCE(SUM(s.active_seconds), 0) AS total_seconds
+             FROM sessions s
+             WHERE " . self::CLOSED_ORDER_WHERE . " AND DATE(s.closed_at) BETWEEN ? AND ?"
         );
         $stmt->execute([$from, $to]);
 
@@ -164,11 +177,11 @@ final class ReportsController
                     COALESCE(SUM(s.time_charge), 0) AS time_revenue,
                     COALESCE(SUM(s.products_total), 0) AS products_revenue,
                     COALESCE(SUM(s.discount), 0) AS discount_total,
-                    COALESCE(SUM(s.total_amount), 0) AS total_revenue,
+                    " . self::NET_REVENUE_SUM . " AS total_revenue,
                     COALESCE(SUM(s.active_seconds), 0) AS total_seconds
              FROM sessions s
              LEFT JOIN tables t ON t.id = s.table_id
-             WHERE s.status = 'closed'
+             WHERE " . self::CLOSED_ORDER_WHERE . "
                AND s.table_id IS NOT NULL
                AND DATE(s.closed_at) BETWEEN ? AND ?
              GROUP BY s.table_id, t.name, t.is_active
@@ -190,10 +203,10 @@ final class ReportsController
                     COALESCE(SUM(s.time_charge), 0) AS time_revenue,
                     COALESCE(SUM(s.products_total), 0) AS products_revenue,
                     COALESCE(SUM(s.discount), 0) AS discount_total,
-                    COALESCE(SUM(s.total_amount), 0) AS total_revenue,
+                    " . self::NET_REVENUE_SUM . " AS total_revenue,
                     COALESCE(SUM(s.active_seconds), 0) AS total_seconds
              FROM sessions s
-             WHERE s.status = 'closed'
+             WHERE " . self::CLOSED_ORDER_WHERE . "
                AND s.table_id IS NULL
                AND DATE(s.closed_at) BETWEEN ? AND ?"
         );
@@ -224,13 +237,14 @@ final class ReportsController
         $to = $params['to'] ?? date('Y-m-d');
 
         $stmt = $this->pdo->prepare(
-            "SELECT DATE(closed_at) AS day,
+            "SELECT DATE(s.closed_at) AS day,
                     COUNT(*) AS sessions,
-                    SUM(total_amount) AS revenue,
-                    SUM(active_seconds) AS seconds
-             FROM sessions
-             WHERE status = 'closed' AND DATE(closed_at) BETWEEN ? AND ?
-             GROUP BY DATE(closed_at) ORDER BY day"
+                    " . self::NET_REVENUE_SUM . " AS revenue,
+                    " . self::REFUNDS_SUM . " AS refunds_total,
+                    COALESCE(SUM(s.active_seconds), 0) AS seconds
+             FROM sessions s
+             WHERE " . self::CLOSED_ORDER_WHERE . " AND DATE(s.closed_at) BETWEEN ? AND ?
+             GROUP BY DATE(s.closed_at) ORDER BY day"
         );
         $stmt->execute([$from, $to]);
 

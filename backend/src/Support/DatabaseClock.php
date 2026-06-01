@@ -21,4 +21,12 @@ final class DatabaseClock
 
         return (string) ($row['now_value'] ?? date('Y-m-d H:i:s'));
     }
+
+    /** ISO8601 — Flutter parse üçün (məs. 2026-05-17T14:30:00+04:00). */
+    public function nowIso(): string
+    {
+        $tz = new \DateTimeZone($_ENV['APP_TIMEZONE'] ?? 'Asia/Baku');
+
+        return (new \DateTimeImmutable('now', $tz))->format('c');
+    }
 }

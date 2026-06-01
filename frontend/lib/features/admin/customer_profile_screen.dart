@@ -226,6 +226,12 @@ class _ProfileHeader extends StatelessWidget {
     final phone = customer['phone'] as String? ?? '';
     final email = customer['email'] as String? ?? '';
     final notes = customer['notes'] as String? ?? '';
+    final groupName = customer['customer_group_name'] as String?;
+    final groupDiscount = customer['customer_group_discount_type'] != null
+        ? (customer['customer_group_discount_type'] == 'percent'
+            ? '${jsonToDouble(customer['customer_group_discount_value']).toStringAsFixed(0)}%'
+            : '${jsonToDouble(customer['customer_group_discount_value']).toStringAsFixed(2)} ₼')
+        : null;
 
     return Container(
       padding: const EdgeInsets.all(AppSpacing.xl),
@@ -247,6 +253,14 @@ class _ProfileHeader extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(name, style: Theme.of(context).textTheme.titleLarge),
+                if (groupName != null && groupName.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Chip(
+                    avatar: const Icon(Icons.local_offer_outlined, size: 16),
+                    label: Text(groupDiscount != null ? '$groupName · $groupDiscount' : groupName),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ],
                 if (phone.isNotEmpty) ...[
                   const SizedBox(height: 6),
                   Row(

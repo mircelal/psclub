@@ -1,0 +1,6 @@
+{
+  "API_URL": "https://psapi.sayt.cam/api",
+  "KIOSK_DEFAULT_ENABLED": "true",
+  "LAUNCH_AT_STARTUP_DEFAULT": "true",
+  "KIOSK_LOCKED": "true"
+}

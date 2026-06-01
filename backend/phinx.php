@@ -33,5 +33,14 @@ return [
             'port' => $_ENV['DB_PORT'] ?? '3306',
             'charset' => 'utf8mb4',
         ],
+        'qa' => [
+            'adapter' => 'mysql',
+            'host' => $_ENV['DB_HOST'] ?? '127.0.0.1',
+            'name' => 'psclub_qa',
+            'user' => $_ENV['DB_USER'] ?? 'root',
+            'pass' => $_ENV['DB_PASS'] ?? '',
+            'port' => $_ENV['DB_PORT'] ?? '3306',
+            'charset' => 'utf8mb4',
+        ],
     ],
 ];

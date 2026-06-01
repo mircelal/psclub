@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/api/api_client.dart';
 import '../core/utils/json_parse.dart';
+import '../core/utils/session_datetime.dart';
 
 final posServiceProvider = Provider<PosService>((ref) => PosService(ref.read(apiClientProvider)));
 
@@ -14,13 +15,26 @@ final sessionSetsProvider = FutureProvider.autoDispose<List<dynamic>>((ref) asyn
   return ref.read(posServiceProvider).getSessionSets();
 });
 
+/// Kassir — masa açarkən göstəriləcək aktiv endirim paketləri.
+final activePromotionsProvider = FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
+  final raw = await ref.read(posServiceProvider).getActivePromotions();
+  return raw.cast<Map<String, dynamic>>();
+});
+
 class PosService {
   PosService(this._api);
   final ApiClient _api;
 
   Future<List<dynamic>> getTables() async {
     final res = await _api.get('/tables');
-    return res['data'] as List<dynamic>;
+    final data = res['data'];
+    if (data is Map<String, dynamic>) {
+      SessionClock.sync(data['server_now'] as String?);
+      final tables = data['tables'];
+      if (tables is List<dynamic>) return tables;
+    }
+    if (data is List<dynamic>) return data;
+    return [];
   }
 
   Future<List<dynamic>> getProducts() async {
@@ -102,10 +116,19 @@ class PosService {
     int sessionId, {
     required String discountType,
     double discountValue = 0,
+    String discountAppliesTo = 'time_only',
   }) async {
     final res = await _api.patch('/sessions/$sessionId/discount', data: {
       'discount_type': discountType,
       'discount_value': discountValue,
+      'discount_applies_to': discountAppliesTo,
+    });
+    return res['data'] as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> assignSessionCustomer(int sessionId, {int? customerId}) async {
+    final res = await _api.patch('/sessions/$sessionId/customer', data: {
+      'customer_id': customerId,
     });
     return res['data'] as Map<String, dynamic>;
   }
@@ -166,9 +189,65 @@ class PosService {
     await _api.delete('/coupons/$id');
   }
 
+  Future<List<dynamic>> getPromotions() async {
+    final res = await _api.get('/promotions');
+    return res['data'] as List<dynamic>;
+  }
+
+  Future<List<dynamic>> getActivePromotions() async {
+    final res = await _api.get('/promotions/active');
+    return res['data'] as List<dynamic>;
+  }
+
+  Future<void> createPromotion(Map<String, dynamic> data) async {
+    await _api.post('/promotions', data: data);
+  }
+
+  Future<void> updatePromotion(int id, Map<String, dynamic> data) async {
+    await _api.put('/promotions/$id', data: data);
+  }
+
+  Future<void> deletePromotion(int id) async {
+    await _api.delete('/promotions/$id');
+  }
+
+  Future<List<dynamic>> getCustomerGroups() async {
+    final res = await _api.get('/customer-groups');
+    return res['data'] as List<dynamic>;
+  }
+
+  Future<List<dynamic>> getActiveCustomerGroups() async {
+    final res = await _api.get('/customer-groups/active');
+    return res['data'] as List<dynamic>;
+  }
+
+  Future<void> createCustomerGroup(Map<String, dynamic> data) async {
+    await _api.post('/customer-groups', data: data);
+  }
+
+  Future<void> updateCustomerGroup(int id, Map<String, dynamic> data) async {
+    await _api.put('/customer-groups/$id', data: data);
+  }
+
+  Future<void> deleteCustomerGroup(int id) async {
+    await _api.delete('/customer-groups/$id');
+  }
+
   Future<Map<String, dynamic>> getSession(int id) async {
     final res = await _api.get('/sessions/$id');
-    return res['data'] as Map<String, dynamic>;
+    return _unwrapSessionPayload(res['data']);
+  }
+
+  /// API bəzən `{ server_now, session }`, bəzən birbaşa sessiya qaytarır.
+  Map<String, dynamic> _unwrapSessionPayload(dynamic data) {
+    if (data is! Map<String, dynamic>) {
+      throw StateError('Invalid session response');
+    }
+    if (data['session'] is Map<String, dynamic>) {
+      SessionClock.sync(data['server_now'] as String?);
+      return data['session'] as Map<String, dynamic>;
+    }
+    return data;
   }
 
   Future<Map<String, dynamic>> addItem(int sessionId, int productId, int qty) async {
@@ -196,6 +275,13 @@ class PosService {
 
   Future<Map<String, dynamic>> resumeSession(int id) async {
     final res = await _api.patch('/sessions/$id/resume');
+    return res['data'] as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> extendSession(int id, {int? addMinutes}) async {
+    final res = await _api.patch('/sessions/$id/extend', data: {
+      if (addMinutes != null) 'add_minutes': addMinutes,
+    });
     return res['data'] as Map<String, dynamic>;
   }
 
@@ -294,6 +380,20 @@ class PosService {
     await _api.post('/users', data: data);
   }
 
+  Future<void> updateUser(int id, Map<String, dynamic> data) async {
+    await _api.put('/users/$id', data: data);
+  }
+
+  Future<void> deleteUser(int id) async {
+    await _api.delete('/users/$id');
+  }
+
+  /// Giriş ekranı — JWT lazım deyil.
+  Future<Map<String, dynamic>> getPublicConfig() async {
+    final res = await _api.get('/public/config');
+    return res['data'] as Map<String, dynamic>;
+  }
+
   Future<Map<String, dynamic>> getSettings() async {
     final res = await _api.get('/settings');
     return res['data'] as Map<String, dynamic>;
@@ -367,10 +467,19 @@ class PosService {
     return res['data'] as Map<String, dynamic>;
   }
 
+  Future<Map<String, dynamic>> deleteOrder(int id, Map<String, dynamic> data) async {
+    final res = await _api.delete('/orders/$id', data: data);
+    return res['data'] as Map<String, dynamic>;
+  }
+
   // Növbə / kassa
   Future<Map<String, dynamic>?> getCurrentShift() async {
     final res = await _api.get('/shifts/current');
-    return res['data'] as Map<String, dynamic>?;
+    final data = res['data'];
+    if (data is! Map<String, dynamic>) return null;
+    if (data['open'] == false) return null;
+    if (data.containsKey('id')) return data;
+    return null;
   }
 
   Future<Map<String, dynamic>> openShift(double openingCash) async {

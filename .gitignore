@@ -1,8 +1,10 @@
 /dist/
 /scripts/deploy-config.local.ps1
+/scripts/node_modules/
 /backend/database/install.sql
 /backend/vendor/
 /backend/.env
+/backend/.qa-db
 /backend/storage/logs/*.log
 /backend/storage/receipts/*.pdf
 /frontend/.dart_tool/

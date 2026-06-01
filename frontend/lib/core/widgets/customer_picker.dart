@@ -13,11 +13,13 @@ class CustomerPicker extends StatefulWidget {
     required this.pos,
     this.selectedId,
     this.onChanged,
+    this.onCustomerDetailChanged,
   });
 
   final PosService pos;
   final int? selectedId;
   final ValueChanged<int?>? onChanged;
+  final ValueChanged<Map<String, dynamic>?>? onCustomerDetailChanged;
 
   @override
   State<CustomerPicker> createState() => _CustomerPickerState();
@@ -57,8 +59,14 @@ class _CustomerPickerState extends State<CustomerPicker> {
       }
       if (found != null && mounted) {
         setState(() => _selected = found);
+        _notifySelection(found);
       }
     } catch (_) {}
+  }
+
+  void _notifySelection(Map<String, dynamic>? customer) {
+    widget.onChanged?.call(customer != null ? customer['id'] as int? : null);
+    widget.onCustomerDetailChanged?.call(customer);
   }
 
   Future<void> _runSearch(String q) async {
@@ -128,7 +136,7 @@ class _CustomerPickerState extends State<CustomerPicker> {
         _expanded = false;
         _queryCtrl.clear();
       });
-      widget.onChanged?.call(created['id'] as int?);
+      _notifySelection(created);
     }
   }
 
@@ -154,7 +162,7 @@ class _CustomerPickerState extends State<CustomerPicker> {
                               _selected = null;
                               _queryCtrl.clear();
                             });
-                            widget.onChanged?.call(null);
+                            _notifySelection(null);
                           },
                         )
                       : null,
@@ -214,14 +222,18 @@ class _CustomerPickerState extends State<CustomerPicker> {
                         return ListTile(
                           dense: true,
                           title: Text(c['name'] as String? ?? '', maxLines: 1, overflow: TextOverflow.ellipsis),
-                          subtitle: Text(c['phone'] as String? ?? ''),
+                          subtitle: Text([
+                            c['phone'] as String? ?? '',
+                            if ((c['customer_group_name'] as String?)?.isNotEmpty == true)
+                              c['customer_group_name'] as String,
+                          ].where((e) => e.isNotEmpty).join(' · ')),
                           onTap: () {
                             setState(() {
                               _selected = c;
                               _expanded = false;
                               _queryCtrl.text = c['name'] as String? ?? '';
                             });
-                            widget.onChanged?.call(c['id'] as int?);
+                            _notifySelection(c);
                           },
                         );
                       },

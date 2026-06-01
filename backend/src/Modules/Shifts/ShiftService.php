@@ -53,7 +53,7 @@ final class ShiftService
         return $stmt->fetch() ?: null;
     }
 
-    /** @return array{cash_sales: float, card_sales: float, expenses: float, owner_withdrawals: float, pay_ins: float, expected_cash: float} */
+    /** @return array{cash_sales: float, card_sales: float, expenses: float, owner_withdrawals: float, pay_ins: float, refunds: float, expected_cash: float} */
     public function liveTotals(array $shift): array
     {
         $shiftId = (int) $shift['id'];
@@ -91,7 +91,8 @@ final class ShiftService
         $expenses = (float) ($byType['expense'] ?? 0);
         $owner = (float) ($byType['owner_withdrawal'] ?? 0);
         $payIns = (float) ($byType['pay_in'] ?? 0);
-        $expected = round($opening + $cashSales - $expenses - $owner + $payIns, 2);
+        $refunds = (float) ($byType['refund'] ?? 0);
+        $expected = round($opening + $cashSales - $expenses - $owner - $refunds + $payIns, 2);
 
         return [
             'cash_sales' => round($cashSales, 2),
@@ -99,6 +100,7 @@ final class ShiftService
             'expenses' => round($expenses, 2),
             'owner_withdrawals' => round($owner, 2),
             'pay_ins' => round($payIns, 2),
+            'refunds' => round($refunds, 2),
             'expected_cash' => $expected,
         ];
     }
@@ -121,9 +123,270 @@ final class ShiftService
     {
         $totals = $this->liveTotals($shift);
         $shift['totals'] = $totals;
-        $shift['movements'] = $shift['status'] === 'open' ? $this->getMovements((int) $shift['id']) : [];
+        $shift['movements'] = $this->getMovements((int) $shift['id']);
 
         return $shift;
+    }
+
+    /** @return list<array<string, mixed>> */
+    public function getShiftActivity(array $shift): array
+    {
+        $shiftId = (int) $shift['id'];
+        $businessId = (int) $shift['business_id'];
+        $openedAt = $shift['opened_at'];
+        $endAt = $shift['closed_at'] ?? date('Y-m-d H:i:s');
+
+        $activity = [];
+
+        $sessStmt = $this->pdo->prepare(
+            'SELECT s.id, s.session_type, s.closed_at, s.time_charge, s.products_total,
+                    s.discount, s.total_amount, s.table_id,
+                    t.name AS table_name,
+                    p.method AS payment_method, p.cash_amount, p.card_amount, p.created_at AS paid_at
+             FROM sessions s
+             LEFT JOIN tables t ON t.id = s.table_id
+             JOIN payments p ON p.session_id = s.id
+             WHERE s.business_id = ?
+               AND s.status = \'closed\'
+               AND s.order_state != \'deleted\'
+               AND s.closed_at >= ?
+               AND s.closed_at <= ?
+               AND (p.shift_id = ? OR p.shift_id IS NULL)
+             ORDER BY s.closed_at DESC'
+        );
+        $sessStmt->execute([$businessId, $openedAt, $endAt, $shiftId]);
+        $sessions = $sessStmt->fetchAll();
+
+        $itemsBySession = [];
+        if ($sessions !== []) {
+            $ids = array_map(static fn (array $r): int => (int) $r['id'], $sessions);
+            $placeholders = implode(',', array_fill(0, count($ids), '?'));
+            $itemStmt = $this->pdo->prepare(
+                "SELECT session_id, product_name, quantity, unit_price, is_set_item
+                 FROM session_items
+                 WHERE session_id IN ({$placeholders})
+                 ORDER BY session_id, id"
+            );
+            $itemStmt->execute($ids);
+            foreach ($itemStmt->fetchAll() as $row) {
+                $sid = (int) $row['session_id'];
+                $itemsBySession[$sid][] = $row;
+            }
+        }
+
+        foreach ($sessions as $session) {
+            $sessionId = (int) $session['id'];
+            $items = $itemsBySession[$sessionId] ?? [];
+            $formatted = $this->formatSessionActivity($session, $items);
+            $activity[] = [
+                'kind' => 'session',
+                'at' => $session['closed_at'] ?? $session['paid_at'],
+                'title' => $formatted['title'],
+                'amount' => round((float) $session['total_amount'], 2),
+                'sign' => '+',
+                'session_id' => $sessionId,
+                'session_type' => (string) ($session['session_type'] ?? 'table'),
+                'lines' => $formatted['lines'],
+            ];
+        }
+
+        $deletedStmt = $this->pdo->prepare(
+            'SELECT s.id, s.session_type, s.closed_at, s.deleted_at, s.time_charge, s.products_total,
+                    s.discount, s.total_amount, s.table_id,
+                    t.name AS table_name,
+                    p.method AS payment_method,
+                    COALESCE(p.pre_delete_cash, 0) AS cash_amount,
+                    COALESCE(p.pre_delete_card, 0) AS card_amount,
+                    u.full_name AS deleted_by_name, u.username AS deleted_by_username
+             FROM sessions s
+             LEFT JOIN tables t ON t.id = s.table_id
+             JOIN payments p ON p.session_id = s.id
+             LEFT JOIN users u ON u.id = s.deleted_by
+             WHERE s.business_id = ?
+               AND s.status = \'closed\'
+               AND s.order_state = \'deleted\'
+               AND s.deleted_at IS NOT NULL
+               AND s.deleted_at >= ?
+               AND s.deleted_at <= ?
+               AND (p.shift_id = ? OR p.shift_id IS NULL)
+             ORDER BY s.deleted_at DESC'
+        );
+        $deletedStmt->execute([$businessId, $openedAt, $endAt, $shiftId]);
+        $deletedSessions = $deletedStmt->fetchAll();
+
+        $deletedItemsBySession = [];
+        if ($deletedSessions !== []) {
+            $ids = array_map(static fn (array $r): int => (int) $r['id'], $deletedSessions);
+            $placeholders = implode(',', array_fill(0, count($ids), '?'));
+            $itemStmt = $this->pdo->prepare(
+                "SELECT session_id, product_name, quantity, unit_price, is_set_item
+                 FROM session_items
+                 WHERE session_id IN ({$placeholders})
+                 ORDER BY session_id, id"
+            );
+            $itemStmt->execute($ids);
+            foreach ($itemStmt->fetchAll() as $row) {
+                $sid = (int) $row['session_id'];
+                $deletedItemsBySession[$sid][] = $row;
+            }
+        }
+
+        foreach ($deletedSessions as $session) {
+            $sessionId = (int) $session['id'];
+            $items = $deletedItemsBySession[$sessionId] ?? [];
+            $formatted = $this->formatSessionActivity($session, $items);
+            $adminName = trim((string) ($session['deleted_by_name'] ?? $session['deleted_by_username'] ?? 'Admin'));
+            $removedTotal = round((float) $session['total_amount'], 2);
+
+            $activity[] = [
+                'kind' => 'session',
+                'at' => $session['closed_at'] ?? $session['deleted_at'],
+                'title' => $formatted['title'],
+                'amount' => $removedTotal,
+                'sign' => '+',
+                'session_id' => $sessionId,
+                'lines' => $formatted['lines'],
+            ];
+
+            $activity[] = [
+                'kind' => 'order_deleted',
+                'at' => $session['deleted_at'],
+                'title' => 'Admin ' . $adminName . ' sildi: sifariş #' . $sessionId,
+                'subtitle' => $formatted['title'],
+                'amount' => $removedTotal,
+                'sign' => '−',
+                'session_id' => $sessionId,
+                'lines' => [
+                    ['label' => 'Sifariş #' . $sessionId . ' ləğv edildi', 'amount' => null],
+                    ['label' => $adminName, 'amount' => null],
+                ],
+            ];
+        }
+
+        foreach ($this->getMovements($shiftId) as $movement) {
+            $type = (string) $movement['type'];
+            $isIn = $type === 'pay_in';
+            $title = $this->movementActivityTitle($type, (string) ($movement['category'] ?? ''));
+            $lines = [];
+            if (!empty($movement['description'])) {
+                $lines[] = ['label' => (string) $movement['description'], 'amount' => null];
+            }
+            if (!empty($movement['created_by_name'])) {
+                $lines[] = ['label' => (string) $movement['created_by_name'], 'amount' => null];
+            }
+
+            $activity[] = [
+                'kind' => 'cash_movement',
+                'at' => $movement['created_at'],
+                'title' => $title,
+                'amount' => round((float) $movement['amount'], 2),
+                'sign' => $isIn ? '+' : '−',
+                'movement_id' => (int) $movement['id'],
+                'movement_type' => $type,
+                'movement_category' => (string) ($movement['category'] ?? ''),
+                'lines' => $lines,
+            ];
+        }
+
+        usort($activity, static function (array $a, array $b): int {
+            return strcmp((string) $a['at'], (string) $b['at']);
+        });
+
+        return $activity;
+    }
+
+    /**
+     * @param array<string, mixed> $session
+     * @param list<array<string, mixed>> $items
+     * @return array{title: string, lines: list<array{label: string, amount: float|null}>}
+     */
+    private function formatSessionActivity(array $session, array $items): array
+    {
+        $sessionType = (string) ($session['session_type'] ?? 'table');
+        $timeCharge = round((float) ($session['time_charge'] ?? 0), 2);
+        $discount = round((float) ($session['discount'] ?? 0), 2);
+        $cash = round((float) ($session['cash_amount'] ?? 0), 2);
+        $card = round((float) ($session['card_amount'] ?? 0), 2);
+        $tableName = trim((string) ($session['table_name'] ?? ''));
+
+        $productLines = [];
+        foreach ($items as $item) {
+            if (!empty($item['is_set_item'])) {
+                continue;
+            }
+            $qty = (int) ($item['quantity'] ?? 1);
+            $unit = round((float) ($item['unit_price'] ?? 0), 2);
+            $lineTotal = round($unit * $qty, 2);
+            $name = (string) ($item['product_name'] ?? 'Məhsul');
+            $productLines[] = [
+                'label' => $qty > 1 ? "{$name} ×{$qty}" : $name,
+                'amount' => $lineTotal,
+            ];
+        }
+
+        $title = $this->sessionActivityTitle($sessionType, $tableName, $timeCharge, $productLines);
+
+        $lines = [];
+        if ($timeCharge > 0) {
+            $lines[] = ['label' => 'Vaxt', 'amount' => $timeCharge];
+        }
+        foreach ($productLines as $pl) {
+            $lines[] = $pl;
+        }
+        if ($discount > 0) {
+            $lines[] = ['label' => 'Endirim', 'amount' => -$discount];
+        }
+        $payParts = [];
+        if ($cash > 0) {
+            $payParts[] = 'nağd ' . number_format($cash, 2, '.', '') . ' AZN';
+        }
+        if ($card > 0) {
+            $payParts[] = 'kart ' . number_format($card, 2, '.', '') . ' AZN';
+        }
+        if ($payParts !== []) {
+            $lines[] = ['label' => 'Ödəniş: ' . implode(' · ', $payParts), 'amount' => null];
+        }
+
+        return ['title' => $title, 'lines' => $lines];
+    }
+
+    /**
+     * @param list<array{label: string, amount: float}> $productLines
+     */
+    private function sessionActivityTitle(
+        string $sessionType,
+        string $tableName,
+        float $timeCharge,
+        array $productLines
+    ): string {
+        if ($sessionType === 'counter') {
+            if ($timeCharge <= 0 && count($productLines) === 1) {
+                $p = $productLines[0];
+
+                return 'Kassa: ' . $p['label'];
+            }
+
+            return 'Kassa satışı — bağlandı';
+        }
+
+        $label = $tableName !== '' ? $tableName : 'Masa';
+
+        return $label . ' — bağlandı';
+    }
+
+    private function movementActivityTitle(string $type, string $category): string
+    {
+        if ($type === 'owner_withdrawal') {
+            return 'Sahibkarə verilmə';
+        }
+        if ($type === 'pay_in') {
+            return 'Kassaya əlavə';
+        }
+        if ($type === 'refund') {
+            return 'Satış qaytarması';
+        }
+
+        return $this->categoryLabel($category);
     }
 
     public function categoryLabel(string $key): string
@@ -131,7 +394,21 @@ final class ShiftService
         if ($key === 'sahibkar') {
             return 'Sahibkarə verilmə';
         }
+        if ($key === 'sale_refund') {
+            return 'Satış qaytarması';
+        }
 
         return self::EXPENSE_CATEGORIES[$key] ?? $key;
+    }
+
+    public function movementTypeLabel(string $type): string
+    {
+        return match ($type) {
+            'expense' => 'Xərc',
+            'owner_withdrawal' => 'Sahibkarə',
+            'pay_in' => 'Kassaya mədaxil',
+            'refund' => 'Satış qaytarması',
+            default => $type,
+        };
     }
 }

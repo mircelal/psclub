@@ -19,6 +19,7 @@ import 'products_screen.dart';
 import 'reports_screen.dart';
 import 'customers_screen.dart';
 import 'session_sets_screen.dart';
+import 'promotions_screen.dart';
 import 'settings_screen.dart';
 import 'stock_screen.dart';
 import 'tables_screen.dart';
@@ -41,6 +42,7 @@ class _AdminShellState extends ConsumerState<AdminShell> {
     (Icons.table_bar_outlined, Icons.table_bar_rounded, 'Masalar'),
     (Icons.inventory_2_outlined, Icons.inventory_2_rounded, 'Məhsullar'),
     (Icons.restaurant_menu_outlined, Icons.restaurant_menu_rounded, 'Paketlər'),
+    (Icons.local_offer_outlined, Icons.local_offer_rounded, 'Endirimlər'),
     (Icons.contacts_outlined, Icons.contacts_rounded, 'Müştərilər'),
     (Icons.warehouse_outlined, Icons.warehouse_rounded, 'Stok'),
     (Icons.people_outline, Icons.people_rounded, 'İstifadəçilər'),
@@ -50,19 +52,23 @@ class _AdminShellState extends ConsumerState<AdminShell> {
     (Icons.history_outlined, Icons.history_rounded, 'Jurnal'),
   ];
 
+  /// Mobil alt panel: [Statistika, Sifarişlər, Müştərilər] — _destinations indeksləri.
+  static const _mobileBottomTabPages = [0, 1, 6];
+
   Widget _page(int i) => switch (i) {
         0 => const DashboardScreen(),
         1 => const OrdersScreen(),
         2 => const TablesScreen(),
         3 => const ProductsScreen(),
         4 => const SessionSetsScreen(),
-        5 => const CustomersScreen(),
-        6 => const StockScreen(),
-        7 => const UsersScreen(),
-        8 => const SettingsScreen(),
-        9 => const ReportsScreen(),
-        10 => const ShiftsScreen(),
-        11 => const AuditScreen(),
+        5 => const PromotionsScreen(),
+        6 => const CustomersScreen(),
+        7 => const StockScreen(),
+        8 => const UsersScreen(),
+        9 => const SettingsScreen(),
+        10 => const ReportsScreen(),
+        11 => const ShiftsScreen(),
+        12 => const AuditScreen(),
         _ => const SizedBox(),
       };
 
@@ -129,12 +135,12 @@ class _AdminShellState extends ConsumerState<AdminShell> {
         bottomNavigationBar: wide
             ? null
             : NavigationBar(
-                selectedIndex: _index.clamp(0, 3),
+                selectedIndex: _mobileBottomNavIndex,
                 onDestinationSelected: (i) {
                   if (i == 3) {
                     _showMoreMenu(context);
-                  } else {
-                    setState(() => _index = i);
+                  } else if (i >= 0 && i < _mobileBottomTabPages.length) {
+                    setState(() => _index = _mobileBottomTabPages[i]);
                   }
                 },
                 destinations: const [
@@ -160,33 +166,35 @@ class _AdminShellState extends ConsumerState<AdminShell> {
     );
   }
 
+  /// Alt paneldə olmayan səhifələr «Digər» menyusundadır.
+  int get _mobileBottomNavIndex {
+    final tab = _mobileBottomTabPages.indexOf(_index);
+    return tab >= 0 ? tab : 3;
+  }
+
   void _showMoreMenu(BuildContext context) {
-    final items = [
-      (0, Icons.dashboard_rounded, 'Statistika'),
-      (1, Icons.receipt_long_rounded, 'Sifarişlər'),
-      (2, Icons.table_bar_rounded, 'Masalar'),
-      (3, Icons.inventory_2_rounded, 'Məhsullar'),
-      (4, Icons.restaurant_menu_rounded, 'Paketlər'),
-      (5, Icons.contacts_rounded, 'Müştərilər'),
-      (6, Icons.warehouse_rounded, 'Stok'),
-      (7, Icons.people_rounded, 'İstifadəçilər'),
-      (8, Icons.tune_rounded, 'Parametrlər'),
-      (9, Icons.bar_chart_rounded, 'Hesabatlar'),
-      (10, Icons.history_rounded, 'Əməliyyat jurnalı'),
-    ];
+    final items = List.generate(_destinations.length, (i) {
+      final d = _destinations[i];
+      return (i, d.$2, d.$3);
+    });
+
+    final maxH = MediaQuery.sizeOf(context).height * 0.75;
 
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: CashierTheme.surfaceRaised(context),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+      builder: (ctx) => SizedBox(
+        height: maxH,
+        child: ListView(
+          padding: const EdgeInsets.only(bottom: 8),
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+              padding: const EdgeInsets.fromLTRB(20, 16, 12, 0),
               child: Row(
                 children: [
                   Text('Menyu', style: CashierTheme.stationTitle(ctx, size: 16)),
@@ -200,6 +208,8 @@ class _AdminShellState extends ConsumerState<AdminShell> {
             ),
             ...items.map(
               (e) => ListTile(
+                dense: true,
+                visualDensity: VisualDensity.compact,
                 leading: Icon(e.$2, color: _index == e.$1 ? BrandColors.brightBlue : CashierTheme.textSecondary(ctx)),
                 title: Text(
                   e.$3,
@@ -214,7 +224,6 @@ class _AdminShellState extends ConsumerState<AdminShell> {
                 },
               ),
             ),
-            const SizedBox(height: 8),
           ],
         ),
       ),

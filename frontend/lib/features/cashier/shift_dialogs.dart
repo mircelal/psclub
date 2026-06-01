@@ -11,7 +11,7 @@ import '../../services/pos_service.dart';
 import 'shift_provider.dart';
 
 Future<bool> showOpenShiftDialog(BuildContext context, WidgetRef ref) async {
-  final ctrl = TextEditingController(text: '100');
+  final ctrl = TextEditingController(text: '0');
   final ok = await showAppDialog<bool>(
     context: context,
     title: 'Növbəni aç',
@@ -237,6 +237,7 @@ Future<void> showCloseShiftDialog(BuildContext context, WidgetRef ref, Map<Strin
   final expenses = jsonToDouble(totals['expenses']);
   final owner = jsonToDouble(totals['owner_withdrawals']);
   final payIns = jsonToDouble(totals['pay_ins']);
+  final refunds = jsonToDouble(totals['refunds']);
 
   final closingCtrl = TextEditingController(text: expected.toStringAsFixed(2));
   final notesCtrl = TextEditingController();
@@ -258,6 +259,7 @@ Future<void> showCloseShiftDialog(BuildContext context, WidgetRef ref, Map<Strin
         if (expenses > 0) _SummaryRow(label: 'Xərclər', value: -expenses, currency: currency),
         if (owner > 0) _SummaryRow(label: 'Sahibkarə', value: -owner, currency: currency),
         if (payIns > 0) _SummaryRow(label: 'Kassaya əlavə', value: payIns, currency: currency),
+        if (refunds > 0) _SummaryRow(label: 'Satış qaytarmaları', value: -refunds, currency: currency),
         const Divider(height: 24),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,

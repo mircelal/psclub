@@ -97,6 +97,7 @@ class AppTextField extends StatelessWidget {
     this.keyboardType,
     this.onSubmitted,
     this.autofocus = false,
+    this.readOnly = false,
   });
 
   final TextEditingController controller;
@@ -107,6 +108,7 @@ class AppTextField extends StatelessWidget {
   final TextInputType? keyboardType;
   final ValueChanged<String>? onSubmitted;
   final bool autofocus;
+  final bool readOnly;
 
   @override
   Widget build(BuildContext context) {
@@ -116,6 +118,7 @@ class AppTextField extends StatelessWidget {
       obscureText: obscureText,
       keyboardType: keyboardType,
       autofocus: autofocus,
+      readOnly: readOnly,
       onSubmitted: onSubmitted,
       style: TextStyle(fontSize: 15, color: scheme.onSurface),
       decoration: InputDecoration(

@@ -10,8 +10,22 @@ final class BillingCalculator
         int $activeSeconds,
         float $hourlyRate,
         string $billingMode,
-        float $rounding = 0.01
+        float $rounding = 0.01,
+        int $minBillingMinutes = 60,
+        int $billingIncrementMinutes = 30,
+        int $billingGraceMinutes = 10,
+        ?int $plannedMinutes = null
     ): float {
+        if ($billingMode === 'min_1h_then_30' && $plannedMinutes !== null && $plannedMinutes > 0) {
+            $billed = $this->billableMinutesFromPlanned(
+                $plannedMinutes,
+                max(1, $minBillingMinutes),
+                max(1, $billingIncrementMinutes)
+            );
+
+            return $this->roundAmount($hourlyRate * ($billed / 60), $rounding);
+        }
+
         if ($activeSeconds <= 0) {
             return 0.0;
         }
@@ -19,10 +33,85 @@ final class BillingCalculator
         $charge = match ($billingMode) {
             'block_30' => $this->blockCharge($activeSeconds, $hourlyRate, 30, 0.5),
             'block_60' => $this->blockCharge($activeSeconds, $hourlyRate, 60, 1.0),
+            'min_1h_then_30' => $this->minFirstHourThenInterval(
+                $activeSeconds,
+                $hourlyRate,
+                max(1, $minBillingMinutes),
+                max(1, $billingIncrementMinutes),
+                max(0, $billingGraceMinutes)
+            ),
             default => $this->perMinuteCharge($activeSeconds, $hourlyRate),
         };
 
         return $this->roundAmount($charge, $rounding);
+    }
+
+    /**
+     * Vaxtsız sessiya: minimum ilk müddət; sonrakı vaxt interval blokları + güzəşt.
+     */
+    public function billableMinutesFromActive(
+        int $activeSeconds,
+        int $minMinutes = 60,
+        int $intervalMinutes = 30,
+        int $graceMinutes = 10
+    ): int {
+        if ($activeSeconds <= 0) {
+            return 0;
+        }
+
+        $minutes = (int) ceil($activeSeconds / 60);
+        $minM = max(1, $minMinutes);
+        $stepM = max(1, $intervalMinutes);
+        $grace = max(0, $graceMinutes);
+
+        if ($minutes <= $minM) {
+            return $minM;
+        }
+
+        $extra = $minutes - $minM;
+        if ($extra <= $grace) {
+            return $minM;
+        }
+
+        $chargeableExtra = $extra - $grace;
+        $blocks = (int) ceil($chargeableExtra / $stepM);
+
+        return $minM + ($blocks * $stepM);
+    }
+
+    /**
+     * Minimum ilk müddət (məs. 60 dəq) tam saatlıq ödəniş; sonrakı vaxt interval (məs. 30 dəq) blokları ilə.
+     */
+    private function minFirstHourThenInterval(
+        int $activeSeconds,
+        float $hourlyRate,
+        int $minMinutes,
+        int $intervalMinutes,
+        int $graceMinutes
+    ): float {
+        $billed = $this->billableMinutesFromActive($activeSeconds, $minMinutes, $intervalMinutes, $graceMinutes);
+
+        return $hourlyRate * ($billed / 60);
+    }
+
+    /**
+     * Müddətli sessiya: ilk blok minimum saat, hər uzatma interval dəqiqəsi üçün ödəniş.
+     */
+    public function billableMinutesFromPlanned(
+        int $plannedMinutes,
+        int $minBillingMinutes = 60,
+        int $billingIncrementMinutes = 30
+    ): int {
+        $minM = max(1, $minBillingMinutes);
+        $stepM = max(1, $billingIncrementMinutes);
+        if ($plannedMinutes <= $minM) {
+            return $minM;
+        }
+
+        $over = $plannedMinutes - $minM;
+        $blocks = (int) ($over / $stepM);
+
+        return $minM + ($blocks * $stepM);
     }
 
     private function perMinuteCharge(int $activeSeconds, float $hourlyRate): float

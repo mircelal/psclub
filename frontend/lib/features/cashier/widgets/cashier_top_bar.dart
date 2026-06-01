@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import '../../../core/config/business_config_provider.dart';
+import '../../../core/layout/mobile_ui.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/brand_colors.dart';
 import '../../../core/theme/cashier_breakpoints.dart';
 import '../../../core/theme/cashier_theme.dart';
 
 const _topBarControlHeight = 40.0;
+const _topBarControlHeightMobile = 48.0;
 
 class CashierTopBar extends StatelessWidget {
   const CashierTopBar({
@@ -14,9 +16,11 @@ class CashierTopBar extends StatelessWidget {
     required this.liveRevenue,
     required this.activeCount,
     required this.totalCount,
+    required this.emptyCount,
     required this.onCounterSale,
-    required this.onShowShortcuts,
+    this.onShowShortcuts,
     this.onMenuTap,
+    this.onRefresh,
     this.layout = CashierTopBarLayout.desktop,
   });
 
@@ -24,9 +28,11 @@ class CashierTopBar extends StatelessWidget {
   final double liveRevenue;
   final int activeCount;
   final int totalCount;
+  final int emptyCount;
   final VoidCallback onCounterSale;
-  final VoidCallback onShowShortcuts;
+  final VoidCallback? onShowShortcuts;
   final VoidCallback? onMenuTap;
+  final VoidCallback? onRefresh;
   final CashierTopBarLayout layout;
 
   @override
@@ -35,10 +41,10 @@ class CashierTopBar extends StatelessWidget {
       decoration: CashierTheme.topBarDecoration(context),
       child: Padding(
         padding: EdgeInsets.fromLTRB(
-          layout == CashierTopBarLayout.mobile ? AppSpacing.md : AppSpacing.xl,
-          AppSpacing.md,
-          layout == CashierTopBarLayout.mobile ? AppSpacing.md : AppSpacing.xl,
-          AppSpacing.md,
+          layout == CashierTopBarLayout.mobile ? AppSpacing.sm : AppSpacing.xl,
+          layout == CashierTopBarLayout.mobile ? AppSpacing.sm : AppSpacing.md,
+          layout == CashierTopBarLayout.mobile ? AppSpacing.sm : AppSpacing.xl,
+          layout == CashierTopBarLayout.mobile ? AppSpacing.sm : AppSpacing.md,
         ),
         child: switch (layout) {
           CashierTopBarLayout.mobile => _buildMobile(context),
@@ -50,35 +56,71 @@ class CashierTopBar extends StatelessWidget {
   }
 
   Widget _buildMobile(BuildContext context) {
-    return Row(
+    final units = biz.labels.unitPlural.toLowerCase();
+    final revenueStr = liveRevenue > 0 ? ' · ${liveRevenue.toStringAsFixed(2)} ₼' : '';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (onMenuTap != null)
-          IconButton(
-            onPressed: onMenuTap,
-            icon: const Icon(Icons.menu_rounded),
-            tooltip: 'Menyu',
-          ),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Kassir', style: CashierTheme.stationTitle(context, size: 17)),
-              Text(
-                '$activeCount / $totalCount aktiv',
-                style: CashierTheme.caption(context),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (onMenuTap != null)
+              IconButton(
+                onPressed: onMenuTap,
+                icon: const Icon(Icons.menu_rounded),
+                tooltip: 'Menyu',
+                iconSize: 26,
+                visualDensity: VisualDensity.compact,
+                constraints: const BoxConstraints(minWidth: kMinTouchTarget, minHeight: kMinTouchTarget),
               ),
-            ],
-          ),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Kassir',
+                    style: CashierTheme.stationTitle(context, size: 18),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '$activeCount aktiv · $emptyCount boş · $totalCount $units$revenueStr',
+                    style: CashierTheme.caption(context),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 4),
+            const _LiveIndicator(compact: true),
+          ],
         ),
-        if (liveRevenue > 0) ...[
-          _RevenueBadge(amount: liveRevenue, compact: true),
-          const SizedBox(width: AppSpacing.xs),
-        ],
-        _iconAction(Icons.shopping_bag_outlined, 'Birbaşa satış', onCounterSale),
-        _iconAction(Icons.keyboard_outlined, 'Qısayollar', onShowShortcuts),
-        _LiveIndicator(compact: true),
+        const SizedBox(height: AppSpacing.sm),
+        Row(
+          children: [
+            Expanded(
+              flex: 3,
+              child: SizedBox(
+                height: kMinTouchTarget,
+                child: FilledButton.icon(
+                  onPressed: onCounterSale,
+                  icon: const Icon(Icons.shopping_bag_outlined, size: 20),
+                  label: const Text('Birbaşa satış'),
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            if (onRefresh != null)
+              _iconAction(Icons.refresh_rounded, 'Yenilə', onRefresh!, mobile: true),
+          ],
+        ),
       ],
     );
   }
@@ -116,8 +158,10 @@ class CashierTopBar extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 12),
           ),
         ),
-        const SizedBox(width: AppSpacing.sm),
-        _iconAction(Icons.keyboard_outlined, 'Qısayollar', onShowShortcuts),
+        if (onShowShortcuts != null) ...[
+          const SizedBox(width: AppSpacing.sm),
+          _iconAction(Icons.keyboard_outlined, 'Qısayollar', onShowShortcuts!),
+        ],
         if (liveRevenue > 0) ...[
           const SizedBox(width: AppSpacing.sm),
           _RevenueBadge(amount: liveRevenue, compact: true),
@@ -159,8 +203,10 @@ class CashierTopBar extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 16),
           ),
         ),
-        const SizedBox(width: AppSpacing.sm),
-        _iconAction(Icons.keyboard_outlined, 'Qısayollar (F1)', onShowShortcuts),
+        if (onShowShortcuts != null) ...[
+          const SizedBox(width: AppSpacing.sm),
+          _iconAction(Icons.keyboard_outlined, 'Qısayollar (F1)', onShowShortcuts!),
+        ],
         const SizedBox(width: AppSpacing.lg),
         if (liveRevenue > 0) ...[
           _RevenueBadge(amount: liveRevenue),
@@ -175,16 +221,17 @@ class CashierTopBar extends StatelessWidget {
     );
   }
 
-  Widget _iconAction(IconData icon, String tooltip, VoidCallback onTap) {
+  Widget _iconAction(IconData icon, String tooltip, VoidCallback onTap, {bool mobile = false}) {
+    final size = mobile ? _topBarControlHeightMobile : _topBarControlHeight;
     return Tooltip(
       message: tooltip,
       child: SizedBox(
-        height: _topBarControlHeight,
-        width: _topBarControlHeight,
+        height: size,
+        width: size,
         child: OutlinedButton(
           onPressed: onTap,
           style: OutlinedButton.styleFrom(padding: EdgeInsets.zero),
-          child: Icon(icon, size: 20),
+          child: Icon(icon, size: mobile ? 22 : 20),
         ),
       ),
     );

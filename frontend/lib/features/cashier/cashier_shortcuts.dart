@@ -186,6 +186,7 @@ class CashierShortcutsScope extends StatelessWidget {
     required this.onTableSlot,
     this.onAdmin,
     this.adminEnabled = false,
+    this.enabled = true,
   });
 
   final Widget child;
@@ -197,9 +198,12 @@ class CashierShortcutsScope extends StatelessWidget {
   final CashierTableSlotHandler onTableSlot;
   final VoidCallback? onAdmin;
   final bool adminEnabled;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
+    if (!enabled) return child;
+
     return Shortcuts(
       shortcuts: cashierShortcutBindings(adminEnabled: adminEnabled),
       child: Actions(

@@ -6,16 +6,17 @@ namespace App\Support;
 
 final class DiscountCalculator
 {
-    public static function amount(float $subtotal, string $type, float $value): float
+    /** @param float $base Subtotal or time_charge only — caller chooses scope. */
+    public static function amount(float $base, string $type, float $value): float
     {
-        if ($subtotal <= 0 || $type === 'none') {
+        if ($base <= 0 || $type === 'none') {
             return 0.0;
         }
         if ($type === 'fixed') {
-            return min($subtotal, max(0, round($value, 2)));
+            return min($base, max(0, round($value, 2)));
         }
         if ($type === 'percent') {
-            return min($subtotal, round($subtotal * max(0, $value) / 100, 2));
+            return min($base, round($base * max(0, $value) / 100, 2));
         }
 
         return 0.0;

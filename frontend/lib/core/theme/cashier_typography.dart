@@ -1,10 +1,37 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'brand_colors.dart'; // DarkNeutral
 
-/// Brend şriftləri — oxunaqlıq üçün Barlow (condensed yalnız kiçik etiketlər).
+/// Brend şriftləri — vebdə sistem şrifti (Google Fonts yaddaş/şəbəkə problemi verir).
 abstract final class CashierTypography {
-  /// Böyük başlıqlar və rəqəmlər
+  static TextStyle _style({
+    required double size,
+    required Color color,
+    required FontWeight weight,
+    double? height,
+    double letterSpacing = 0,
+    double defaultHeight = 1.35,
+  }) {
+    if (kIsWeb) {
+      return TextStyle(
+        fontFamily: 'Segoe UI, Roboto, Helvetica, Arial, sans-serif',
+        fontSize: size,
+        fontWeight: weight,
+        color: color,
+        height: height ?? defaultHeight,
+        letterSpacing: letterSpacing,
+      );
+    }
+    return GoogleFonts.barlow(
+      fontSize: size,
+      fontWeight: weight,
+      color: color,
+      height: height ?? defaultHeight,
+      letterSpacing: letterSpacing,
+    );
+  }
+
   static TextStyle display({
     required double size,
     Color color = BrandColors.navy,
@@ -12,15 +39,15 @@ abstract final class CashierTypography {
     double? height,
     double letterSpacing = 0,
   }) =>
-      GoogleFonts.barlow(
-        fontSize: size,
-        fontWeight: weight,
+      _style(
+        size: size,
         color: color,
-        height: height ?? 1.2,
+        weight: weight,
+        height: height,
         letterSpacing: letterSpacing,
+        defaultHeight: 1.2,
       );
 
-  /// Əsas UI mətn — normal en, orta qalınlıq
   static TextStyle ui({
     required double size,
     Color color = BrandColors.navy,
@@ -28,27 +55,26 @@ abstract final class CashierTypography {
     double? height,
     double letterSpacing = 0,
   }) =>
-      GoogleFonts.barlow(
-        fontSize: size,
-        fontWeight: weight,
+      _style(
+        size: size,
         color: color,
-        height: height ?? 1.35,
+        weight: weight,
+        height: height,
         letterSpacing: letterSpacing,
       );
 
-  /// Kiçik bölmə etiketləri (STANSİYALAR, GÜNDƏLİK)
   static TextStyle label({
     required double size,
     Color color = BrandColors.brightBlue,
     FontWeight weight = FontWeight.w600,
     double letterSpacing = 0.5,
   }) =>
-      GoogleFonts.barlow(
-        fontSize: size,
-        fontWeight: weight,
+      _style(
+        size: size,
         color: color,
-        height: 1.25,
+        weight: weight,
         letterSpacing: letterSpacing,
+        defaultHeight: 1.25,
       );
 
   static TextTheme textTheme(Brightness brightness) {

@@ -9,7 +9,6 @@ import '../../core/config/business_config_provider.dart';
 import '../../core/config/media_url.dart';
 import '../../core/config/venue_labels.dart';
 import '../../core/settings/app_settings.dart';
-import '../../core/settings/desktop_window_service.dart';
 import '../../core/settings/kiosk_settings_tiles.dart';
 import '../../core/settings/ui_settings_sheet.dart';
 import '../../core/theme/app_palette.dart';
@@ -33,6 +32,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   String _billingMode = 'per_minute';
   String _venueType = 'gaming';
   bool _timeBillingEnabled = true;
+  final _minOpenCtrl = TextEditingController(text: '60');
+  final _extendStepCtrl = TextEditingController(text: '30');
+  final _minBillingCtrl = TextEditingController(text: '60');
+  final _billingIncCtrl = TextEditingController(text: '30');
+  final _billingGraceCtrl = TextEditingController(text: '10');
   final _nameCtrl = TextEditingController();
   final _taglineCtrl = TextEditingController();
   final _headerCtrl = TextEditingController();
@@ -55,6 +59,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _taglineCtrl.dispose();
     _headerCtrl.dispose();
     _footerCtrl.dispose();
+    _minOpenCtrl.dispose();
+    _extendStepCtrl.dispose();
+    _minBillingCtrl.dispose();
+    _billingIncCtrl.dispose();
+    _billingGraceCtrl.dispose();
     super.dispose();
   }
 
@@ -76,6 +85,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _venueType = biz['venue_type']?.toString() ?? 'gaming';
     final tb = biz['time_billing_enabled'];
     _timeBillingEnabled = tb == null || tb == true || tb == 1 || tb == '1';
+    _minOpenCtrl.text = '${biz['min_open_minutes'] ?? 60}';
+    _extendStepCtrl.text = '${biz['extend_step_minutes'] ?? 30}';
+    _minBillingCtrl.text = '${biz['min_billing_minutes'] ?? 60}';
+    _billingIncCtrl.text = '${biz['billing_increment_minutes'] ?? 30}';
+    _billingGraceCtrl.text = '${biz['billing_grace_minutes'] ?? 10}';
     _logoUrl = MediaUrl.resolve(biz['logo_url']?.toString());
     _localLogoPath = null;
     _localLogoBytes = null;
@@ -166,6 +180,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         'venue_type': _venueType,
         'billing_mode': _billingMode,
         'time_billing_enabled': _timeBillingEnabled,
+        'min_open_minutes': int.tryParse(_minOpenCtrl.text.trim()) ?? 60,
+        'extend_step_minutes': int.tryParse(_extendStepCtrl.text.trim()) ?? 30,
+        'min_billing_minutes': int.tryParse(_minBillingCtrl.text.trim()) ?? 60,
+        'billing_increment_minutes': int.tryParse(_billingIncCtrl.text.trim()) ?? 30,
+        'billing_grace_minutes': int.tryParse(_billingGraceCtrl.text.trim()) ?? 10,
         if (_logoUrl != null) 'logo_url': _logoUrl,
       },
       'settings': {
@@ -267,17 +286,113 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   const SizedBox(height: AppSpacing.md),
                   Text('Tarif rejimi', style: Theme.of(context).textTheme.bodyMedium),
                   const SizedBox(height: AppSpacing.sm),
-                  SegmentedButton<String>(
-                    segments: const [
-                      ButtonSegment(value: 'per_minute', label: Text('Dəqiqəlik')),
-                      ButtonSegment(value: 'block_30', label: Text('30 dəq')),
-                      ButtonSegment(value: 'block_60', label: Text('1 saat')),
+                  Wrap(
+                    spacing: AppSpacing.sm,
+                    runSpacing: AppSpacing.sm,
+                    children: [
+                      ChoiceChip(
+                        label: const Text('Dəqiqəlik'),
+                        selected: _billingMode == 'per_minute',
+                        onSelected: (_) => setState(() => _billingMode = 'per_minute'),
+                      ),
+                      ChoiceChip(
+                        label: const Text('30 dəq blok'),
+                        selected: _billingMode == 'block_30',
+                        onSelected: (_) => setState(() => _billingMode = 'block_30'),
+                      ),
+                      ChoiceChip(
+                        label: const Text('1 saat blok'),
+                        selected: _billingMode == 'block_60',
+                        onSelected: (_) => setState(() => _billingMode = 'block_60'),
+                      ),
+                      ChoiceChip(
+                        label: const Text('Min 1 saat + 30 dəq'),
+                        selected: _billingMode == 'min_1h_then_30',
+                        onSelected: (_) => setState(() => _billingMode = 'min_1h_then_30'),
+                      ),
                     ],
-                    selected: {_billingMode},
-                    onSelectionChanged: (s) => setState(() => _billingMode = s.first),
                   ),
+                  if (_billingMode == 'min_1h_then_30') ...[
+                    const SizedBox(height: AppSpacing.md),
+                    Text(
+                      'İlk ${_minBillingCtrl.text} dəq minimum hesablanır (qısa qalma da daxil). '
+                      'Sonra hər ${_billingIncCtrl.text} dəq blok; ilk saatdan sonra ${_billingGraceCtrl.text} dəqə qədər '
+                      'əlavə vaxt pulsuz sayılır (məs. 1 saat 9 dəq = 1 saat).',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                  const SizedBox(height: AppSpacing.lg),
+                  Text('Masa açılışı və uzatma', style: Theme.of(context).textTheme.titleSmall),
+                  const SizedBox(height: AppSpacing.sm),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _minOpenCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Min. açılış (dəq)',
+                            helperText: 'Müddətli açılış minimum; sonra uzatma addımı ilə',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.md),
+                      Expanded(
+                        child: TextField(
+                          controller: _extendStepCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Uzatma addımı (dəq)',
+                            helperText: '1 saat bitəndən sonra',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _minBillingCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Min. hesab (dəq)',
+                            helperText: '«Min 1 saat + 30 dəq» rejimi',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.md),
+                      Expanded(
+                        child: TextField(
+                          controller: _billingIncCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Sonrakı interval (dəq)',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (_billingMode == 'min_1h_then_30') ...[
+                    const SizedBox(height: AppSpacing.sm),
+                    TextField(
+                      controller: _billingGraceCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Güzəşt (dəq)',
+                        helperText: 'İlk saatdan sonra — əlavə vaxt hesablanmır',
+                      ),
+                    ),
+                  ],
                 ],
               ),
+            ),
+            const SizedBox(height: AppSpacing.xxl),
+            _SettingsSection(
+              title: 'Kiosk və Windows',
+              subtitle: 'Kassir terminalı — tam ekran və kompüter açılanda avtomatik işə düşmə',
+              child: const KioskSettingsTiles(),
             ),
             const SizedBox(height: AppSpacing.xxl),
             _SettingsSection(
@@ -339,14 +454,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 ],
               ),
             ),
-            if (DesktopWindowService.isDesktop) ...[
-              const SizedBox(height: AppSpacing.xxl),
-              _SettingsSection(
-                title: 'Kiosk və Windows',
-                subtitle: 'Kassir terminalı üçün tam ekran və avtomatik işə düşmə',
-                child: const KioskSettingsTiles(),
-              ),
-            ],
             const SizedBox(height: AppSpacing.xxl),
             _SettingsSection(
               title: 'Qəbz parametrləri',

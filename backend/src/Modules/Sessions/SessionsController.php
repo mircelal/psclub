@@ -10,9 +10,11 @@ use App\Modules\Shifts\ShiftService;
 use App\Modules\Shifts\ShiftsController;
 use App\Modules\Stock\StockController;
 use App\Support\ApiResponse;
+use App\Support\BusinessBillingColumns;
 use App\Support\BillingCalculator;
 use App\Support\DatabaseClock;
 use App\Support\DiscountCalculator;
+use App\Support\PromotionService;
 use PDO;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -28,6 +30,7 @@ final class SessionsController
         private readonly ReceiptService $receipts,
         private readonly SessionSetsController $sessionSets,
         private readonly ShiftService $shifts,
+        private readonly PromotionService $promotions,
     ) {
     }
 
@@ -57,7 +60,10 @@ final class SessionsController
         if (!$session) {
             return ApiResponse::error('Session not found', 404);
         }
-        return ApiResponse::success($this->enrichSession($session));
+        return ApiResponse::success([
+            'server_now' => $this->clock->nowIso(),
+            'session' => $this->enrichSession($session),
+        ]);
     }
 
     public function store(Request $request, Response $response): Response
@@ -105,14 +111,6 @@ final class SessionsController
             return ApiResponse::error('Table already has active session', 409);
         }
 
-        $tariffId = isset($body['tariff_id']) ? (int) $body['tariff_id'] : null;
-        $resolved = $this->resolveTableTariff($tableId, $tariffId);
-        if ($resolved === false) {
-            return ApiResponse::error('Tariff is required', 422, ['code' => 'tariff_required']);
-        }
-
-        [$hourlyRate, $tariffIdFinal, $tariffName] = $resolved;
-
         $setId = isset($body['set_id']) ? (int) $body['set_id'] : null;
         $setRow = $setId > 0 ? $this->sessionSets->findSet($setId) : null;
         if ($setId > 0 && $setRow === null) {
@@ -130,6 +128,44 @@ final class SessionsController
             $setPrice = (float) $setRow['fixed_price'];
             if (!empty($setRow['planned_minutes'])) {
                 $plannedMinutes = (int) $setRow['planned_minutes'];
+            }
+            $hourlyRate = 0.0;
+            $tariffIdFinal = null;
+            $tariffName = null;
+        } else {
+            $tariffId = isset($body['tariff_id']) ? (int) $body['tariff_id'] : null;
+            $resolved = $this->resolveTableTariff($tableId, $tariffId);
+            if ($resolved === false) {
+                return ApiResponse::error('Tariff is required', 422, ['code' => 'tariff_required']);
+            }
+
+            [$hourlyRate, $tariffIdFinal, $tariffName] = $resolved;
+        }
+
+        $timing = $this->businessTiming();
+        if ($setRow === null && $plannedMinutes !== null) {
+            if ($plannedMinutes < $timing['min_open_minutes']) {
+                return ApiResponse::error(
+                    'Minimum açılış müddəti ' . $timing['min_open_minutes'] . ' dəqiqədir',
+                    422,
+                    ['code' => 'min_open_minutes', 'min' => $timing['min_open_minutes']]
+                );
+            }
+            if ($plannedMinutes > 180) {
+                return ApiResponse::error(
+                    'Maksimum açılış müddəti 3 saatdır (180 dəqiqə)',
+                    422,
+                    ['code' => 'max_open_minutes', 'max' => 180]
+                );
+            }
+            $overMin = $plannedMinutes - $timing['min_open_minutes'];
+            if ($overMin % $timing['extend_step_minutes'] !== 0) {
+                return ApiResponse::error(
+                    'Müddət ' . $timing['min_open_minutes'] . ' dəq minimum, sonra hər '
+                    . $timing['extend_step_minutes'] . ' dəq addım ilə seçilməlidir',
+                    422,
+                    ['code' => 'open_minutes_step', 'step' => $timing['extend_step_minutes']]
+                );
             }
         }
 
@@ -188,13 +224,63 @@ final class SessionsController
             $value = 0;
         }
 
+        $appliesTo = $body['discount_applies_to'] ?? 'time_only';
+        if (!in_array($appliesTo, ['all', 'time_only'], true)) {
+            return ApiResponse::error('Invalid discount scope', 422);
+        }
+
         $bill = $this->calculateBill($session);
-        $subtotal = (float) $bill['time_charge'] + (float) $bill['products_total'];
-        $discountAmount = DiscountCalculator::amount($subtotal, $type, $value);
+        $timeCharge = (float) $bill['time_charge'];
+        $subtotal = $timeCharge + (float) $bill['products_total'];
+        $base = $appliesTo === 'time_only' ? $timeCharge : $subtotal;
+
+        if ($type !== 'none') {
+            $limitError = $this->promotions->validateManualDiscount($user, $type, $value, $base);
+            if ($limitError !== null) {
+                return ApiResponse::error($limitError, 422);
+            }
+        }
+
+        $discountAmount = $type === 'none'
+            ? 0.0
+            : DiscountCalculator::amount($base, $type, $value);
 
         $this->pdo->prepare(
-            'UPDATE sessions SET discount_type = ?, discount_value = ?, discount = ?, coupon_id = NULL, updated_at = NOW() WHERE id = ?'
-        )->execute([$type, $value, $discountAmount, $sessionId]);
+            'UPDATE sessions SET discount_type = ?, discount_value = ?, discount = ?, discount_applies_to = ?, coupon_id = NULL, promotion_id = NULL, updated_at = NOW() WHERE id = ?'
+        )->execute([$type, $value, $discountAmount, $appliesTo, $sessionId]);
+
+        return ApiResponse::success($this->enrichSession($this->findSession($sessionId)));
+    }
+
+    public function assignCustomer(Request $request, Response $response, array $args): Response
+    {
+        $user = $request->getAttribute('user');
+        if ($denied = ShiftsController::assertCashierHasOpenShift($this->shifts, $user)) {
+            return $denied;
+        }
+
+        $sessionId = (int) $args['id'];
+        $body = (array) $request->getParsedBody();
+        if (!array_key_exists('customer_id', $body)) {
+            return ApiResponse::error('Validation failed', 422);
+        }
+
+        $session = $this->findSession($sessionId);
+        if (!$session || !in_array($session['status'], ['active', 'paused'], true)) {
+            return ApiResponse::error('Session not active', 400);
+        }
+
+        $raw = $body['customer_id'];
+        $customerId = null;
+        if ($raw !== null && $raw !== '' && (int) $raw > 0) {
+            $customerId = (int) $raw;
+            if (!$this->customerExists($customerId)) {
+                return ApiResponse::error('Customer not found', 404);
+            }
+        }
+
+        $this->pdo->prepare('UPDATE sessions SET customer_id = ?, updated_at = NOW() WHERE id = ?')
+            ->execute([$customerId, $sessionId]);
 
         return ApiResponse::success($this->enrichSession($this->findSession($sessionId)));
     }
@@ -232,13 +318,13 @@ final class SessionsController
         }
 
         $bill = $this->calculateBill($session);
-        $subtotal = (float) $bill['time_charge'] + (float) $bill['products_total'];
+        $timeCharge = (float) $bill['time_charge'];
         $type = $coupon['discount_type'];
         $value = (float) $coupon['discount_value'];
-        $discountAmount = DiscountCalculator::amount($subtotal, $type, $value);
+        $discountAmount = DiscountCalculator::amount($timeCharge, $type, $value);
 
         $this->pdo->prepare(
-            'UPDATE sessions SET discount_type = ?, discount_value = ?, discount = ?, coupon_id = ?, updated_at = NOW() WHERE id = ?'
+            'UPDATE sessions SET discount_type = ?, discount_value = ?, discount = ?, discount_applies_to = \'time_only\', coupon_id = ?, promotion_id = NULL, updated_at = NOW() WHERE id = ?'
         )->execute([$type, $value, $discountAmount, (int) $coupon['id'], $sessionId]);
 
         return ApiResponse::success($this->enrichSession($this->findSession($sessionId)));
@@ -258,7 +344,7 @@ final class SessionsController
         }
 
         $this->pdo->prepare(
-            'UPDATE sessions SET discount_type = \'none\', discount_value = 0, discount = 0, coupon_id = NULL, updated_at = NOW() WHERE id = ?'
+            'UPDATE sessions SET discount_type = \'none\', discount_value = 0, discount = 0, coupon_id = NULL, promotion_id = NULL, updated_at = NOW() WHERE id = ?'
         )->execute([$sessionId]);
 
         return ApiResponse::success($this->enrichSession($this->findSession($sessionId)));
@@ -399,6 +485,10 @@ final class SessionsController
             return ApiResponse::error('Item not found', 404);
         }
 
+        if (!empty($item['is_set_item'])) {
+            return ApiResponse::error('Paket məhsulları səbətdən silinə bilməz', 400);
+        }
+
         $this->pdo->beginTransaction();
         try {
             $productId = (int) ($item['product_id'] ?? 0);
@@ -424,6 +514,59 @@ final class SessionsController
     public function resume(Request $request, Response $response, array $args): Response
     {
         return $this->togglePause($request, (int) $args['id'], false);
+    }
+
+    public function extendPlannedTime(Request $request, Response $response, array $args): Response
+    {
+        $sessionId = (int) $args['id'];
+        $body = (array) $request->getParsedBody();
+        $user = $request->getAttribute('user');
+        if ($denied = ShiftsController::assertCashierHasOpenShift($this->shifts, $user)) {
+            return $denied;
+        }
+
+        $session = $this->findSession($sessionId);
+        if (!$session || !in_array($session['status'], ['active', 'paused'], true)) {
+            return ApiResponse::error('Session not active', 400);
+        }
+
+        $currentPlanned = isset($session['planned_minutes']) ? (int) $session['planned_minutes'] : 0;
+        if ($currentPlanned <= 0) {
+            return ApiResponse::error('Müddətsiz sessiya uzadıla bilməz', 400);
+        }
+
+        if (!empty($session['set_id']) || (float) ($session['set_price_snapshot'] ?? 0) > 0) {
+            return ApiResponse::error('Paket sessiyasında müddət uzadıla bilməz — sabit paket qiyməti', 400);
+        }
+
+        $timing = $this->businessTiming();
+        $add = (int) ($body['add_minutes'] ?? $timing['extend_step_minutes']);
+        if ($add !== $timing['extend_step_minutes']) {
+            return ApiResponse::error(
+                'Yalnız ' . $timing['extend_step_minutes'] . ' dəqiqəlik uzatma mümkündür',
+                422
+            );
+        }
+
+        $bill = $this->calculateBill($session);
+        $activeSeconds = (int) $bill['active_seconds'];
+        $minSeconds = $timing['min_open_minutes'] * 60;
+        $remaining = $bill['remaining_seconds'] ?? null;
+        $firstHourDone = $activeSeconds >= $minSeconds;
+        $expired = $remaining !== null && $remaining <= 0;
+
+        if (!$firstHourDone && !$expired) {
+            return ApiResponse::error(
+                'İlk ' . $timing['min_open_minutes'] . ' dəqiqə bitməyib — uzatma hələ aktiv deyil',
+                400
+            );
+        }
+
+        $newPlanned = $currentPlanned + $add;
+        $this->pdo->prepare('UPDATE sessions SET planned_minutes = ?, updated_at = NOW() WHERE id = ?')
+            ->execute([$newPlanned, $sessionId]);
+
+        return ApiResponse::success($this->enrichSession($this->findSession($sessionId)));
     }
 
     private function togglePause(Request $request, int $sessionId, bool $pause): Response
@@ -514,6 +657,19 @@ final class SessionsController
             return ApiResponse::error('Payment amounts do not match total', 422);
         }
 
+        $isCounter = ($session['session_type'] ?? 'table') === 'counter';
+        if ($isCounter) {
+            $itemStmt = $this->pdo->prepare('SELECT COUNT(*) FROM session_items WHERE session_id = ?');
+            $itemStmt->execute([$sessionId]);
+            $itemCount = (int) $itemStmt->fetchColumn();
+            if ($itemCount > 0 && round($total, 2) <= 0) {
+                return ApiResponse::error('Səbətdə məhsul var — əvvəlcə səbəti təmizləyin və ya ödəniş alın', 422);
+            }
+            if ($itemCount > 0 && round($cash + $card, 2) < round($total, 2)) {
+                return ApiResponse::error('Birbaşa satış üçün tam ödəniş tələb olunur', 422);
+            }
+        }
+
         $this->pdo->beginTransaction();
         try {
             $this->pdo->prepare(
@@ -578,7 +734,7 @@ final class SessionsController
     {
         $stmt = $this->pdo->prepare(
             'SELECT s.*, t.name AS table_name,
-                    c.name AS customer_name, c.phone AS customer_phone,
+                    c.name AS customer_name, c.phone AS customer_phone, c.customer_group_id,
                     cp.code AS coupon_code, cp.name AS coupon_name
              FROM sessions s
              LEFT JOIN tables t ON t.id = s.table_id
@@ -606,9 +762,12 @@ final class SessionsController
             return $session;
         }
         $bill = $this->calculateBill($session);
-        $subtotal = (float) $bill['time_charge'] + (float) $bill['products_total'];
+        $timeCharge = (float) $bill['time_charge'];
+        $subtotal = $timeCharge + (float) $bill['products_total'];
+        $appliesTo = $session['discount_applies_to'] ?? 'time_only';
+        $base = $appliesTo === 'time_only' ? $timeCharge : $subtotal;
         $value = (float) ($session['discount_value'] ?? 0);
-        $amount = DiscountCalculator::amount($subtotal, $type, $value);
+        $amount = DiscountCalculator::amount($base, $type, $value);
         if (abs($amount - (float) ($session['discount'] ?? 0)) > 0.001) {
             $this->pdo->prepare('UPDATE sessions SET discount = ?, updated_at = NOW() WHERE id = ?')
                 ->execute([$amount, (int) $session['id']]);
@@ -645,6 +804,14 @@ final class SessionsController
         $session['pauses'] = $this->getPauses((int) $session['id']);
         $session['items'] = $this->getItems((int) $session['id']);
         $session['bill_preview'] = $this->calculateBill($session);
+        $promo = $this->promotions->findBestForSession($session, (float) ($session['bill_preview']['time_charge'] ?? 0));
+        $session['active_promotion'] = $promo ? [
+            'id' => (int) $promo['id'],
+            'name' => $promo['name'],
+            'discount_type' => $promo['discount_type'],
+            'discount_value' => (float) $promo['discount_value'],
+        ] : null;
+        $session['active_customer_group'] = $session['bill_preview']['active_customer_group'] ?? null;
         if (($session['session_type'] ?? 'table') === 'counter' && empty($session['table_name'])) {
             $session['table_name'] = 'Kassa satışı';
         }
@@ -664,32 +831,55 @@ final class SessionsController
         );
 
         $isCounter = ($session['session_type'] ?? 'table') === 'counter';
-        $biz = $this->pdo->query('SELECT billing_mode, billing_rounding, time_billing_enabled FROM businesses WHERE id = 1')->fetch();
+        $bizSelect = BusinessBillingColumns::selectSql($this->pdo, [
+            'billing_mode', 'billing_rounding', 'time_billing_enabled',
+        ]);
+        $biz = BusinessBillingColumns::withDefaults(
+            $this->pdo->query("SELECT {$bizSelect} FROM businesses WHERE id = 1")->fetch()
+        );
+        $timing = BusinessBillingColumns::timingFromRow($this->pdo, $biz);
         $timeBilling = !$isCounter && (!isset($biz['time_billing_enabled']) || (bool) $biz['time_billing_enabled']);
         $setPrice = (float) ($session['set_price_snapshot'] ?? 0);
         if ($setPrice > 0) {
             $timeCharge = round($setPrice, 2);
             $productsTotal = $this->billing->calculateProductsTotal($items, true);
         } else {
+            $plannedMinutes = isset($session['planned_minutes']) ? (int) $session['planned_minutes'] : 0;
             $timeCharge = $timeBilling
                 ? $this->billing->calculateTimeCharge(
                     $activeSeconds,
                     (float) $session['hourly_rate_snapshot'],
                     $biz['billing_mode'] ?? 'per_minute',
-                    (float) ($biz['billing_rounding'] ?? 0.01)
+                    (float) ($biz['billing_rounding'] ?? 0.01),
+                    $timing['min_billing_minutes'],
+                    $timing['billing_increment_minutes'],
+                    $timing['billing_grace_minutes'],
+                    $plannedMinutes > 0 ? $plannedMinutes : null
                 )
                 : 0.0;
             $productsTotal = $this->billing->calculateProductsTotal($items);
         }
         $subtotal = $timeCharge + $productsTotal;
         $discountType = $session['discount_type'] ?? 'none';
+        $discountAppliesTo = $session['discount_applies_to'] ?? 'time_only';
+        $resolved = $this->promotions->resolveDiscount($session, $timeCharge, $productsTotal);
+        $discount = $resolved['amount'];
+        $promotion = $resolved['promotion'];
+        $customerGroup = $resolved['customer_group'];
+        $displayCustomerGroup = $this->promotions->displayCustomerGroup($session);
+        if ($discountType !== 'none') {
+            $base = $discountAppliesTo === 'time_only' ? $timeCharge : $subtotal;
+            $discount = DiscountCalculator::amount($base, $discountType, (float) ($session['discount_value'] ?? 0));
+            $promotion = null;
+            $customerGroup = null;
+        }
         $discountValue = (float) ($session['discount_value'] ?? 0);
-        $discount = $discountType !== 'none'
-            ? DiscountCalculator::amount($subtotal, $discountType, $discountValue)
-            : (float) ($session['discount'] ?? 0);
         $total = round($subtotal - $discount, 2);
 
-        $plannedMinutes = isset($session['planned_minutes']) ? (int) $session['planned_minutes'] : 0;
+        if (!isset($plannedMinutes)) {
+            $plannedMinutes = isset($session['planned_minutes']) ? (int) $session['planned_minutes'] : 0;
+        }
+        $hasPackage = $setPrice > 0;
         $remainingSeconds = $plannedMinutes > 0
             ? max(0, ($plannedMinutes * 60) - $activeSeconds)
             : null;
@@ -703,12 +893,31 @@ final class SessionsController
             'discount' => $discount,
             'discount_type' => $discountType,
             'discount_value' => $discountValue,
+            'discount_applies_to' => $discountAppliesTo,
+            'promotion_id' => $promotion ? (int) $promotion['id'] : null,
+            'promotion_name' => $promotion ? (string) $promotion['name'] : null,
+            'promotion_discount_type' => $promotion ? (string) $promotion['discount_type'] : null,
+            'promotion_discount_value' => $promotion ? (float) $promotion['discount_value'] : null,
+            'active_promotion' => $promotion ? [
+                'id' => (int) $promotion['id'],
+                'name' => (string) $promotion['name'],
+                'discount_type' => (string) $promotion['discount_type'],
+                'discount_value' => (float) $promotion['discount_value'],
+            ] : null,
+            'customer_group_id' => $customerGroup ? (int) $customerGroup['id'] : null,
+            'customer_group_name' => $customerGroup ? (string) $customerGroup['name'] : null,
+            'customer_group_discount_type' => $customerGroup ? (string) $customerGroup['discount_type'] : null,
+            'customer_group_discount_value' => $customerGroup ? (float) $customerGroup['discount_value'] : null,
+            'customer_group_applies_to' => $customerGroup ? (string) ($customerGroup['applies_to'] ?? 'time_only') : null,
+            'active_customer_group' => $displayCustomerGroup,
             'coupon_code' => $session['coupon_code'] ?? null,
             'total_amount' => $total,
             'items' => $items,
             'planned_minutes' => $plannedMinutes > 0 ? $plannedMinutes : null,
             'remaining_seconds' => $remainingSeconds,
-            'is_countdown' => $plannedMinutes > 0,
+            'is_countdown' => !$hasPackage && $plannedMinutes > 0,
+            'is_package' => $hasPackage,
+            'computed_at' => $this->clock->nowIso(),
         ];
     }
 
@@ -773,5 +982,19 @@ final class SessionsController
                  VALUES (?, ?, ?, ?, 0, 1, NOW())'
             )->execute([$sessionId, $productId, $product['name'], $qty]);
         }
+    }
+
+    /**
+     * @param array<string, mixed>|null $row
+     * @return array{min_open_minutes: int, extend_step_minutes: int, min_billing_minutes: int, billing_increment_minutes: int, billing_grace_minutes: int}
+     */
+    private function businessTiming(?array $row = null): array
+    {
+        if ($row === null) {
+            $select = BusinessBillingColumns::selectSql($this->pdo, ['id']);
+            $row = $this->pdo->query("SELECT {$select} FROM businesses WHERE id = 1")->fetch();
+        }
+
+        return BusinessBillingColumns::timingFromRow($this->pdo, $row);
     }
 }

@@ -13,6 +13,8 @@ import '../../core/theme/app_spacing.dart';
 import '../../core/widgets/app_dialog.dart';
 import '../../core/widgets/money_text.dart';
 import '../../services/pos_service.dart';
+import 'shift_provider.dart';
+import 'widgets/session_discount_dialog.dart';
 import 'widgets/table_card.dart';
 import 'widgets/payment_method_selector.dart';
 
@@ -56,8 +58,11 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
       final isCounter = widget.isCounter || (session['session_type'] ?? 'table') == 'counter';
       final live = computeSessionLiveBill(
         session,
-        billingMode: config.billingMode,
+        billingMode: config.chargeBillingMode,
         timeBillingEnabled: !isCounter && config.timeBillingEnabled,
+        minBillingMinutes: config.minBillingMinutes,
+        billingIncrementMinutes: config.billingIncrementMinutes,
+        billingGraceMinutes: config.billingGraceMinutes,
       );
       if (mounted) {
         setState(() {
@@ -91,6 +96,41 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
     super.dispose();
   }
 
+  Future<void> _applyManualDiscount() async {
+    if (_bill == null) return;
+    final result = await showSessionDiscountDialog(
+      context,
+      timeCharge: _bill!.timeCharge,
+      productsTotal: _bill!.productsTotal,
+      currentDiscount: _bill!.discount,
+      discountType: _bill!.discountType,
+      discountValue: _bill!.discountValue,
+      checkoutMode: true,
+      currentTotal: _bill!.totalAmount,
+    );
+    if (result == null || !mounted) return;
+
+    setState(() => _loadingBill = true);
+    try {
+      if (result.clear) {
+        await ref.read(posServiceProvider).clearSessionDiscount(widget.sessionId);
+      } else {
+        await ref.read(posServiceProvider).setSessionDiscount(
+              widget.sessionId,
+              discountType: result.discountType!,
+              discountValue: result.discountValue ?? 0,
+              discountAppliesTo: 'time_only',
+            );
+      }
+      await _loadBill();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+      }
+      setState(() => _loadingBill = false);
+    }
+  }
+
   Future<void> _close() async {
     if (_bill == null) return;
     setState(() => _loading = true);
@@ -103,6 +143,7 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
             cashAmount: cash,
             cardAmount: card,
           );
+      refreshCurrentShift(ref);
       setState(() {
         _receipt = result['receipt'] as Map<String, dynamic>?;
         _loading = false;
@@ -198,7 +239,11 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
     final dialogWidth = (screen.width * 0.5).clamp(420.0, 560.0);
     final dialogHeight = (screen.height * 0.85).clamp(480.0, 720.0);
 
-    return Dialog(
+    final blockDismiss = widget.isCounter && total > 0;
+
+    return PopScope(
+      canPop: !blockDismiss,
+      child: Dialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
       child: SizedBox(
         width: dialogWidth,
@@ -230,7 +275,8 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
                       ],
                     ),
                   ),
-                  IconButton(onPressed: () => Navigator.pop(context, false), icon: const Icon(Icons.close, size: 20)),
+                  if (!blockDismiss)
+                    IconButton(onPressed: () => Navigator.pop(context, false), icon: const Icon(Icons.close, size: 20)),
                 ],
               ),
             ),
@@ -247,12 +293,22 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
                             BillSummaryCard(
                               timeCharge: bill.timeCharge,
                               productsTotal: bill.productsTotal,
+                              discount: bill.discount,
+                              promotionName: bill.promotionName,
                               total: bill.totalAmount,
                               activeMinutes: bill.activeMinutes,
                               timeLabel: config.timeBillingEnabled
                                   ? '${config.labels.rateLabel} (${bill.activeMinutes} dəq)'
                                   : null,
                             ),
+                          if (bill != null && !widget.isCounter && bill.timeCharge > 0) ...[
+                            const SizedBox(height: AppSpacing.md),
+                            OutlinedButton.icon(
+                              onPressed: _loading || _loadingBill ? null : _applyManualDiscount,
+                              icon: const Icon(Icons.local_offer_outlined),
+                              label: const Text('Əl ilə endirim'),
+                            ),
+                          ],
                           const SizedBox(height: AppSpacing.xl),
                           Container(
                             padding: const EdgeInsets.all(AppSpacing.xl),
@@ -349,21 +405,23 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
               padding: const EdgeInsets.fromLTRB(AppSpacing.xxl, AppSpacing.md, AppSpacing.xxl, AppSpacing.xl),
               child: Row(
                 children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: _loading ? null : () => Navigator.pop(context, false),
-                      child: const Text('Ləğv et'),
+                  if (!blockDismiss) ...[
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: _loading ? null : () => Navigator.pop(context, false),
+                        child: const Text('Ləğv et'),
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: AppSpacing.md),
+                    const SizedBox(width: AppSpacing.md),
+                  ],
                   Expanded(
-                    flex: 2,
+                    flex: blockDismiss ? 1 : 2,
                     child: FilledButton(
                       onPressed: _loading || _loadingBill || bill == null ? null : _close,
                       style: FilledButton.styleFrom(backgroundColor: AppColors.accent, foregroundColor: AppColors.bg),
                       child: _loading
                           ? const SizedBox(height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2))
-                          : const Text('Ödənişi təsdiqlə'),
+                          : Text(blockDismiss ? 'Ödənişi al və bağla' : 'Ödənişi təsdiqlə'),
                     ),
                   ),
                 ],
@@ -372,6 +430,7 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
           ],
         ),
       ),
+    ),
     );
   }
 }

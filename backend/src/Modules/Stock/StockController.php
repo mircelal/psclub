@@ -107,9 +107,18 @@ final class StockController
         $this->pdo->prepare('UPDATE product_stock SET quantity = ?, updated_at = NOW() WHERE product_id = ?')
             ->execute([$newQty, $productId]);
 
+        $stockType = match ($movementType) {
+            'return', 'refund', 'order_delete' => 'in',
+            'sale' => 'sale',
+            'out' => 'out',
+            'adjustment' => 'adjustment',
+            'in' => 'in',
+            default => 'in',
+        };
+
         $this->pdo->prepare(
             'INSERT INTO stock_movements (business_id, product_id, type, quantity, reference_type, reference_id, note, created_by, created_at)
              VALUES (1, ?, ?, ?, ?, ?, ?, ?, NOW())'
-        )->execute([$productId, $movementType, abs($quantity), $refType, $refId, $note, $userId]);
+        )->execute([$productId, $stockType, abs($quantity), $refType, $refId, $note, $userId]);
     }
 }

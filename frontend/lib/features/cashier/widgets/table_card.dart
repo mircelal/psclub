@@ -6,8 +6,10 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/cashier_theme.dart';
 import '../../../core/theme/table_status_theme.dart';
 import '../../../core/utils/json_parse.dart';
+import '../../../core/utils/package_session.dart';
 import '../../../core/utils/table_tariff_utils.dart';
 import '../../../core/widgets/money_text.dart';
+import '../../../services/pos_service.dart';
 import '../../../core/widgets/status_badge.dart';
 import 'table_live_state.dart';
 import 'table_session_items.dart';
@@ -22,6 +24,7 @@ class TableCard extends ConsumerStatefulWidget {
     required this.onTap,
     this.onSecondaryTap,
     this.compact = false,
+    this.mobile = false,
   });
 
   final Map<String, dynamic> table;
@@ -29,6 +32,7 @@ class TableCard extends ConsumerStatefulWidget {
   final VoidCallback onTap;
   final void Function(TapDownDetails details)? onSecondaryTap;
   final bool compact;
+  final bool mobile;
 
   @override
   ConsumerState<TableCard> createState() => _TableCardState();
@@ -47,7 +51,13 @@ class _TableCardState extends ConsumerState<TableCard> with SingleTickerProvider
   @override
   void didUpdateWidget(covariant TableCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _syncBlinkAnimation());
+    if (oldWidget.table['session_id'] != widget.table['session_id'] ||
+        oldWidget.table['status'] != widget.table['status'] ||
+        oldWidget.table['session_status'] != widget.table['session_status']) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _syncBlinkAnimation());
+    } else {
+      _syncBlinkAnimation();
+    }
   }
 
   @override
@@ -61,8 +71,11 @@ class _TableCardState extends ConsumerState<TableCard> with SingleTickerProvider
     final config = ref.read(businessConfigProvider).valueOrNull ?? BusinessConfig.fallback;
     return computeTableLive(
           widget.table,
-          billingMode: config.billingMode,
+          billingMode: config.chargeBillingMode,
           timeBillingEnabled: config.timeBillingEnabled,
+          minBillingMinutes: config.minBillingMinutes,
+          billingIncrementMinutes: config.billingIncrementMinutes,
+          billingGraceMinutes: config.billingGraceMinutes,
         )?.isExpired ??
         false;
   }
@@ -87,14 +100,18 @@ class _TableCardState extends ConsumerState<TableCard> with SingleTickerProvider
     final live = hasSession
         ? computeTableLive(
             widget.table,
-            billingMode: config.billingMode,
+            billingMode: config.chargeBillingMode,
             timeBillingEnabled: config.timeBillingEnabled,
+            minBillingMinutes: config.minBillingMinutes,
+            billingIncrementMinutes: config.billingIncrementMinutes,
+            billingGraceMinutes: config.billingGraceMinutes,
           )
         : null;
     final name = widget.table['name'] as String;
     final rate = jsonToDouble(widget.table['session_hourly_rate'] ?? widget.table['hourly_rate']);
     final tariffLabel = widget.table['session_set_name'] as String? ?? activeSessionTariffLabel(widget.table);
-    final rateSummary = formatTableTariffSummary(widget.table);
+    final promos = ref.watch(activePromotionsProvider).valueOrNull ?? [];
+    final rateSummary = formatEffectiveTariffSummary(widget.table, promos);
 
     final sessionId = widget.table['session_id'] as int?;
     final isExpired = live?.isExpired ?? false;
@@ -131,7 +148,7 @@ class _TableCardState extends ConsumerState<TableCard> with SingleTickerProvider
                 Container(height: cardStyle.accentBarWidth, color: cardStyle.accent),
                 Expanded(
                   child: Padding(
-                    padding: EdgeInsets.all(widget.compact ? 12 : 14),
+                    padding: EdgeInsets.all(widget.mobile ? 10 : (widget.compact ? 12 : 14)),
                     child: hasSession && live != null
                         ? _ActiveBody(
                             name: name,
@@ -142,9 +159,12 @@ class _TableCardState extends ConsumerState<TableCard> with SingleTickerProvider
                             isPaused: isPaused,
                             tick: widget.tick,
                             compact: widget.compact,
+                            mobile: widget.mobile,
                             cardStyle: cardStyle,
                             timeBillingEnabled: config.timeBillingEnabled,
                             tariffLabel: tariffLabel,
+                            isPackage: live.isPackage,
+                            packagePrice: live.isPackage ? tablePackagePrice(widget.table) : null,
                           )
                         : _EmptyBody(
                             name: name,
@@ -153,6 +173,7 @@ class _TableCardState extends ConsumerState<TableCard> with SingleTickerProvider
                             status: status,
                             cardStyle: cardStyle,
                             compact: widget.compact,
+                            mobile: widget.mobile,
                           ),
                   ),
                 ),
@@ -177,7 +198,10 @@ class _ActiveBody extends StatelessWidget {
     required this.compact,
     required this.cardStyle,
     required this.timeBillingEnabled,
+    this.mobile = false,
     this.tariffLabel,
+    this.isPackage = false,
+    this.packagePrice,
   });
 
   final String name;
@@ -188,9 +212,12 @@ class _ActiveBody extends StatelessWidget {
   final bool isPaused;
   final int tick;
   final bool compact;
+  final bool mobile;
   final TableStatusStyle cardStyle;
   final bool timeBillingEnabled;
   final String? tariffLabel;
+  final bool isPackage;
+  final double? packagePrice;
 
   @override
   Widget build(BuildContext context) {
@@ -201,7 +228,14 @@ class _ActiveBody extends StatelessWidget {
       children: [
         Row(
           children: [
-            Expanded(child: Text(name, style: CashierTheme.stationTitle(context, size: compact ? 15 : 16), maxLines: 1, overflow: TextOverflow.ellipsis)),
+            Expanded(
+              child: Text(
+                name,
+                style: CashierTheme.stationTitle(context, size: mobile ? 14 : (compact ? 15 : 16)),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
             StatusBadge(label: _statusLabel(status), status: status, hasSession: hasSession),
           ],
         ),
@@ -213,33 +247,45 @@ class _ActiveBody extends StatelessWidget {
               bill: bill,
               isPaused: isPaused,
               tick: tick,
-              compact: compact,
-              large: !compact,
+              compact: compact || mobile,
+              large: !compact && !mobile,
               isExpired: live.isExpired,
               isUrgent: live.isUrgent,
               color: cardStyle.accent,
             ),
           ),
         ),
-        if (!compact && ((timeBillingEnabled && bill.timeCharge > 0) || bill.productsTotal > 0)) ...[
+        if (!compact && !mobile && ((isPackage && bill.timeCharge > 0) || (timeBillingEnabled && bill.timeCharge > 0) || bill.productsTotal > 0 || live.discount > 0)) ...[
           const SizedBox(height: 6),
           Row(
             children: [
-              if (timeBillingEnabled && bill.timeCharge > 0)
+              if (isPackage && bill.timeCharge > 0)
+                Expanded(child: _BreakdownChip(label: 'Paket', amount: bill.timeCharge, color: cardStyle.accent))
+              else if (timeBillingEnabled && bill.timeCharge > 0)
                 Expanded(child: _BreakdownChip(label: 'Vaxt', amount: bill.timeCharge, color: cardStyle.accent)),
-              if (timeBillingEnabled && bill.timeCharge > 0 && bill.productsTotal > 0) const SizedBox(width: 6),
+              if (bill.timeCharge > 0 && bill.productsTotal > 0) const SizedBox(width: 6),
               if (bill.productsTotal > 0)
                 Expanded(child: _BreakdownChip(label: 'Məhsul', amount: bill.productsTotal, color: const Color(0xFF5856D6))),
+              if (live.discount > 0) ...[
+                if (bill.timeCharge > 0 || bill.productsTotal > 0) const SizedBox(width: 6),
+                Expanded(
+                  child: _BreakdownChip(
+                    label: live.promotionName != null ? 'Endirim' : 'Endirim',
+                    amount: live.discount,
+                    color: const Color(0xFF34C759),
+                  ),
+                ),
+              ],
             ],
           ),
         ],
-        if (!compact && live.items.isNotEmpty) ...[
+        if (!compact && !mobile && live.items.isNotEmpty) ...[
           const SizedBox(height: 4),
           TableSessionItems(items: live.items, compact: true, maxVisible: 2),
         ],
         const Spacer(flex: 1),
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          padding: EdgeInsets.symmetric(horizontal: mobile ? 10 : 12, vertical: mobile ? 8 : 10),
           decoration: BoxDecoration(
             color: cardStyle.timerZoneFill,
             borderRadius: BorderRadius.circular(CashierTheme.radiusControl),
@@ -247,21 +293,59 @@ class _ActiveBody extends StatelessWidget {
           ),
           child: Row(
             children: [
-              Text('Cəmi', style: CashierTheme.caption(context)),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Cəmi', style: CashierTheme.caption(context)),
+                  if (live.discount > 0)
+                    Text(
+                      live.promotionName ?? 'Endirim tətbiq olunub',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: const Color(0xFF34C759).withValues(alpha: 0.9),
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                ],
+              ),
               const Spacer(),
               MoneyText(
                 amount: bill.totalAmount,
-                size: compact ? MoneySize.medium : MoneySize.large,
+                size: (compact || mobile) ? MoneySize.medium : MoneySize.large,
                 color: cardStyle.moneyColor ?? CashierTheme.textPrimary(context),
                 suffix: ' ₼',
               ),
             ],
           ),
         ),
-        if (tariffLabel != null && !compact) ...[
+        if (mobile && ((isPackage && bill.timeCharge > 0) || (timeBillingEnabled && bill.timeCharge > 0) || bill.productsTotal > 0 || live.discount > 0)) ...[
+          const SizedBox(height: 4),
+          Text(
+            [
+              if (isPackage && bill.timeCharge > 0) 'Paket ${bill.timeCharge.toStringAsFixed(2)}',
+              if (!isPackage && timeBillingEnabled && bill.timeCharge > 0) 'Vaxt ${bill.timeCharge.toStringAsFixed(2)}',
+              if (bill.productsTotal > 0) 'Məhsul ${bill.productsTotal.toStringAsFixed(2)}',
+              if (live.discount > 0) 'Endirim -${live.discount.toStringAsFixed(2)}',
+            ].join(' · '),
+            style: CashierTheme.caption(context),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+          ),
+        ],
+        if (isPackage && packagePrice != null && !compact && !mobile) ...[
+          const SizedBox(height: 4),
+          Text(
+            '${tariffLabel ?? 'Paket'} · ${packagePrice!.toStringAsFixed(2)} ₼',
+            style: CashierTheme.caption(context),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ] else if (tariffLabel != null && !compact && !mobile) ...[
           const SizedBox(height: 4),
           Text(tariffLabel!, style: CashierTheme.caption(context), maxLines: 1, overflow: TextOverflow.ellipsis),
-        ] else if (!compact) ...[
+        ] else if (!isPackage && !compact && !mobile) ...[
           const SizedBox(height: 4),
           Text('${rate.toStringAsFixed(2)} ₼/saat', style: CashierTheme.caption(context), maxLines: 1, overflow: TextOverflow.ellipsis),
         ],
@@ -285,6 +369,7 @@ class _EmptyBody extends StatelessWidget {
     required this.cardStyle,
     required this.rateSummary,
     required this.compact,
+    this.mobile = false,
   });
 
   final String name;
@@ -293,6 +378,7 @@ class _EmptyBody extends StatelessWidget {
   final String status;
   final TableStatusStyle cardStyle;
   final bool compact;
+  final bool mobile;
 
   String get _initial => name.isNotEmpty ? name[0].toUpperCase() : '?';
 
@@ -304,8 +390,8 @@ class _EmptyBody extends StatelessWidget {
         Row(
           children: [
             Container(
-              width: compact ? 36 : 40,
-              height: compact ? 36 : 40,
+              width: mobile ? 32 : (compact ? 36 : 40),
+              height: mobile ? 32 : (compact ? 36 : 40),
               decoration: BoxDecoration(
                 color: cardStyle.badgeFill,
                 borderRadius: BorderRadius.circular(CashierTheme.radiusControl),
@@ -326,7 +412,12 @@ class _EmptyBody extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(name, style: CashierTheme.stationTitle(context, size: compact ? 14 : 15), maxLines: 1, overflow: TextOverflow.ellipsis),
+                  Text(
+                    name,
+                    style: CashierTheme.stationTitle(context, size: mobile ? 13 : (compact ? 14 : 15)),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                   const SizedBox(height: 2),
                   Text('Hazır', style: CashierTheme.caption(context)),
                 ],
@@ -336,15 +427,19 @@ class _EmptyBody extends StatelessWidget {
           ],
         ),
         const Spacer(flex: 1),
-        _MetaRow(icon: Icons.payments_outlined, label: 'Tariflər', value: rateSummary),
-        if (!compact) ...[
+        if (!mobile) _MetaRow(icon: Icons.payments_outlined, label: 'Tariflər', value: rateSummary),
+        if (!compact && !mobile) ...[
           const SizedBox(height: 6),
           _MetaRow(icon: Icons.event_available_outlined, label: 'Status', value: 'Sessiya gözləyir'),
+        ],
+        if (mobile) ...[
+          Text(rateSummary, style: CashierTheme.caption(context), maxLines: 2, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center),
+          const SizedBox(height: 6),
         ],
         const Spacer(flex: 1),
         SizedBox(
           width: double.infinity,
-          height: compact ? 34 : 36,
+          height: mobile ? 40 : (compact ? 34 : 36),
           child: FilledButton(
             onPressed: null,
             style: FilledButton.styleFrom(
@@ -436,14 +531,20 @@ class BillSummaryCard extends StatelessWidget {
     required this.productsTotal,
     required this.total,
     required this.activeMinutes,
+    this.discount = 0,
+    this.promotionName,
     this.timeLabel,
+    this.timeChargeLabel,
   });
 
   final double timeCharge;
   final double productsTotal;
+  final double discount;
+  final String? promotionName;
   final double total;
   final int activeMinutes;
   final String? timeLabel;
+  final String? timeChargeLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -457,14 +558,27 @@ class BillSummaryCard extends StatelessWidget {
       ),
       child: Column(
         children: [
-          if (timeLabel != null) ...[
-            _row(context, timeLabel!, timeCharge),
-            const SizedBox(height: AppSpacing.sm),
-          ] else if (timeCharge > 0) ...[
-            _row(context, 'Vaxt ($activeMinutes dəq)', timeCharge),
+          if (timeCharge > 0) ...[
+            _row(
+              context,
+              timeChargeLabel != null
+                  ? (timeLabel != null ? '$timeChargeLabel ($timeLabel)' : timeChargeLabel!)
+                  : (timeLabel ?? 'Vaxt ($activeMinutes dəq)'),
+              timeCharge,
+            ),
             const SizedBox(height: AppSpacing.sm),
           ],
           _row(context, 'Məhsullar', productsTotal),
+          if (discount > 0) ...[
+            const SizedBox(height: AppSpacing.sm),
+            _row(
+              context,
+              promotionName != null ? 'Endirim ($promotionName)' : 'Endirim',
+              discount,
+              negative: true,
+              prefixMinus: true,
+            ),
+          ],
           const Padding(
             padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
             child: Divider(height: 1),
@@ -488,12 +602,18 @@ class BillSummaryCard extends StatelessWidget {
     );
   }
 
-  Widget _row(BuildContext context, String label, double amount) {
+  Widget _row(BuildContext context, String label, double amount, {bool negative = false, bool prefixMinus = false}) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text(label, style: Theme.of(context).textTheme.bodyMedium),
-        MoneyText(amount: amount, size: MoneySize.small, suffix: ' ₼'),
+        Text(
+          '${prefixMinus ? '−' : ''}${amount.toStringAsFixed(2)} ₼',
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+                color: negative ? AppColors.danger : null,
+              ),
+        ),
       ],
     );
   }

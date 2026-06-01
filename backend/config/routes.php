@@ -8,8 +8,10 @@ use App\Middleware\RoleGuardMiddleware;
 use App\Modules\Audit\AuditController;
 use App\Modules\Auth\AuthController;
 use App\Modules\Coupons\CouponsController;
+use App\Modules\Customers\CustomerGroupsController;
 use App\Modules\Customers\CustomersController;
 use App\Modules\Orders\OrdersController;
+use App\Modules\Promotions\PromotionsController;
 use App\Modules\Products\ProductMediaController;
 use App\Modules\Products\ProductsController;
 use App\Modules\Receipts\ReceiptsController;
@@ -38,6 +40,9 @@ return function (App $app): void {
 
     $app->post('/api/auth/login', [AuthController::class, 'login']);
 
+    // Giriş ekranı — JWT olmadan (brend adı, logo, tarif rejimi)
+    $app->get('/api/public/config', [SettingsController::class, 'publicIndex']);
+
     $app->get('/api/media/products/{filename}', [ProductMediaController::class, 'serve']);
     $app->get('/api/media/business/logo', [BusinessMediaController::class, 'serve']);
 
@@ -57,6 +62,9 @@ return function (App $app): void {
         $group->post('/customers', [CustomersController::class, 'store']);
         $group->get('/stock/alerts', [StockController::class, 'alerts']);
         $group->get('/session-sets', [SessionSetsController::class, 'index']);
+        $group->get('/promotions/active', [PromotionsController::class, 'active']);
+
+        $group->get('/customer-groups/active', [CustomerGroupsController::class, 'active']);
 
         $group->get('/sessions/active', [SessionsController::class, 'active']);
         $group->get('/sessions/{id}', [SessionsController::class, 'show']);
@@ -66,7 +74,9 @@ return function (App $app): void {
         $group->delete('/sessions/{id}/items/{itemId}', [SessionsController::class, 'removeItem']);
         $group->patch('/sessions/{id}/pause', [SessionsController::class, 'pause']);
         $group->patch('/sessions/{id}/resume', [SessionsController::class, 'resume']);
+        $group->patch('/sessions/{id}/extend', [SessionsController::class, 'extendPlannedTime']);
         $group->patch('/sessions/{id}/discount', [SessionsController::class, 'setDiscount']);
+        $group->patch('/sessions/{id}/customer', [SessionsController::class, 'assignCustomer']);
         $group->post('/sessions/{id}/apply-coupon', [SessionsController::class, 'applyCoupon']);
         $group->delete('/sessions/{id}/discount', [SessionsController::class, 'clearDiscount']);
         $group->get('/sessions/{id}/preview', [SessionsController::class, 'preview']);
@@ -110,6 +120,16 @@ return function (App $app): void {
             $admin->put('/coupons/{id}', [CouponsController::class, 'update']);
             $admin->delete('/coupons/{id}', [CouponsController::class, 'destroy']);
 
+            $admin->get('/promotions', [PromotionsController::class, 'index']);
+            $admin->post('/promotions', [PromotionsController::class, 'store']);
+            $admin->put('/promotions/{id}', [PromotionsController::class, 'update']);
+            $admin->delete('/promotions/{id}', [PromotionsController::class, 'destroy']);
+
+            $admin->get('/customer-groups', [CustomerGroupsController::class, 'index']);
+            $admin->post('/customer-groups', [CustomerGroupsController::class, 'store']);
+            $admin->put('/customer-groups/{id}', [CustomerGroupsController::class, 'update']);
+            $admin->delete('/customer-groups/{id}', [CustomerGroupsController::class, 'destroy']);
+
             $admin->get('/customers/{id}', [CustomersController::class, 'show']);
             $admin->put('/customers/{id}', [CustomersController::class, 'update']);
             $admin->delete('/customers/{id}', [CustomersController::class, 'destroy']);
@@ -133,6 +153,7 @@ return function (App $app): void {
             $admin->get('/orders/{id}', [OrdersController::class, 'show']);
             $admin->put('/orders/{id}/adjust', [OrdersController::class, 'adjust']);
             $admin->post('/orders/{id}/refund', [OrdersController::class, 'refund']);
+            $admin->delete('/orders/{id}', [OrdersController::class, 'delete']);
         })->add($adminGuard);
     })
         ->add(AuditMiddleware::class)

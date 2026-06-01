@@ -39,10 +39,13 @@ final class ShiftsController
         $shift = $this->shifts->getOpenShift($businessId);
 
         if (!$shift) {
-            return ApiResponse::success(null);
+            return ApiResponse::success(['open' => false]);
         }
 
-        return ApiResponse::success($this->shifts->enrichShift($shift));
+        $payload = $this->shifts->enrichShift($shift);
+        $payload['open'] = true;
+
+        return ApiResponse::success($payload);
     }
 
     public function open(Request $request, Response $response): Response
@@ -126,6 +129,7 @@ final class ShiftsController
             'expenses' => $totals['expenses'],
             'owner_withdrawals' => $totals['owner_withdrawals'],
             'pay_ins' => $totals['pay_ins'],
+            'refunds' => $totals['refunds'],
         ];
 
         return ApiResponse::success($closed);
@@ -221,16 +225,11 @@ final class ShiftsController
         }
 
         $shift['movements'] = $this->shifts->getMovements((int) $shift['id']);
-        if ($shift['status'] === 'open') {
-            $shift['totals'] = $this->shifts->liveTotals($shift);
-        } else {
-            $shift['totals'] = [
-                'cash_sales' => (float) $shift['cash_sales'],
-                'card_sales' => (float) $shift['card_sales'],
-                'expected_cash' => (float) $shift['expected_cash'],
-                'cash_difference' => (float) $shift['cash_difference'],
-            ];
+        $shift['totals'] = $this->shifts->liveTotals($shift);
+        if ($shift['status'] === 'closed') {
+            $shift['totals']['cash_difference'] = (float) ($shift['cash_difference'] ?? 0);
         }
+        $shift['activity'] = $this->shifts->getShiftActivity($shift);
 
         return ApiResponse::success($shift);
     }

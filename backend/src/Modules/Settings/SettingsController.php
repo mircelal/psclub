@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Modules\Settings;
 
 use App\Support\ApiResponse;
+use App\Support\BusinessBillingColumns;
 use PDO;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -13,6 +14,29 @@ final class SettingsController
 {
     public function __construct(private readonly PDO $pdo)
     {
+    }
+
+    /** Giriş səhifəsi və veb — auth tələb etmir. */
+    public function publicIndex(Request $request, Response $response): Response
+    {
+        $select = BusinessBillingColumns::selectSql($this->pdo, [
+            'id', 'name', 'tagline', 'venue_type', 'currency', 'billing_mode', 'time_billing_enabled', 'logo_url',
+        ]);
+        $stmt = $this->pdo->query("SELECT {$select} FROM businesses WHERE id = 1 LIMIT 1");
+        $biz = BusinessBillingColumns::withDefaults($stmt->fetch() ?: []);
+
+        $settingsStmt = $this->pdo->query(
+            "SELECT `key`, value FROM settings WHERE business_id = 1 AND `key` IN ('receipt_header', 'receipt_footer')"
+        );
+        $settings = [];
+        foreach ($settingsStmt->fetchAll() as $row) {
+            $settings[$row['key']] = $row['value'];
+        }
+
+        return ApiResponse::success([
+            'business' => $biz,
+            'settings' => $settings,
+        ]);
     }
 
     public function index(Request $request, Response $response): Response
@@ -38,7 +62,12 @@ final class SettingsController
             $b = $body['business'];
             $fields = [];
             $params = [];
-            foreach (['name', 'tagline', 'venue_type', 'currency', 'billing_mode', 'billing_rounding', 'min_stock_threshold', 'logo_url', 'time_billing_enabled'] as $key) {
+            foreach ([
+                'name', 'tagline', 'venue_type', 'currency', 'billing_mode', 'billing_rounding',
+                'min_stock_threshold', 'logo_url', 'time_billing_enabled',
+                'min_open_minutes', 'extend_step_minutes', 'min_billing_minutes', 'billing_increment_minutes',
+                'billing_grace_minutes',
+            ] as $key) {
                 if (array_key_exists($key, $b)) {
                     $fields[] = "{$key} = ?";
                     $params[] = $b[$key];

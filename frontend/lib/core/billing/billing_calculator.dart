@@ -38,33 +38,118 @@ class BillingCalculator {
     return (total - paused).clamp(0, 999999);
   }
 
+  /// Müddətli sessiya: min saat + hər uzatma intervalı (planned_minutes əsasında).
+  static int billableMinutesFromPlanned({
+    required int plannedMinutes,
+    int minBillingMinutes = 60,
+    int billingIncrementMinutes = 30,
+  }) {
+    final minM = minBillingMinutes < 1 ? 60 : minBillingMinutes;
+    final stepM = billingIncrementMinutes < 1 ? 30 : billingIncrementMinutes;
+    if (plannedMinutes <= minM) return minM;
+    final over = plannedMinutes - minM;
+    final blocks = over ~/ stepM;
+    return minM + blocks * stepM;
+  }
+
+  /// Vaxtsız sessiya: minimum ilk müddət; sonrakı interval blokları + güzəşt.
+  static int billableMinutesFromActive({
+    required int activeSeconds,
+    int minBillingMinutes = 60,
+    int billingIncrementMinutes = 30,
+    int billingGraceMinutes = 10,
+  }) {
+    if (activeSeconds <= 0) return 0;
+    final minutes = (activeSeconds / 60).ceil();
+    final minM = minBillingMinutes < 1 ? 60 : minBillingMinutes;
+    final stepM = billingIncrementMinutes < 1 ? 30 : billingIncrementMinutes;
+    final grace = billingGraceMinutes < 0 ? 0 : billingGraceMinutes;
+    if (minutes <= minM) return minM;
+    final extra = minutes - minM;
+    if (extra <= grace) return minM;
+    final chargeableExtra = extra - grace;
+    final blocks = (chargeableExtra / stepM).ceil();
+    return minM + blocks * stepM;
+  }
+
+  static int billableMinutes({
+    required int activeSeconds,
+    required String billingMode,
+    int minBillingMinutes = 60,
+    int billingIncrementMinutes = 30,
+    int billingGraceMinutes = 10,
+    int? plannedMinutes,
+  }) {
+    if (billingMode == 'min_1h_then_30' && plannedMinutes != null && plannedMinutes > 0) {
+      return billableMinutesFromPlanned(
+        plannedMinutes: plannedMinutes,
+        minBillingMinutes: minBillingMinutes,
+        billingIncrementMinutes: billingIncrementMinutes,
+      );
+    }
+    if (activeSeconds <= 0) return 0;
+    final minutes = (activeSeconds / 60).ceil();
+    switch (billingMode) {
+      case 'block_30':
+        return ((minutes / 30).ceil()) * 30;
+      case 'block_60':
+        return ((minutes / 60).ceil()) * 60;
+      case 'min_1h_then_30':
+        return billableMinutesFromActive(
+          activeSeconds: activeSeconds,
+          minBillingMinutes: minBillingMinutes,
+          billingIncrementMinutes: billingIncrementMinutes,
+          billingGraceMinutes: billingGraceMinutes,
+        );
+      default:
+        return minutes;
+    }
+  }
+
   static double calculateTimeCharge({
     required int activeSeconds,
     required double hourlyRate,
     required String billingMode,
     double rounding = 0.01,
+    int minBillingMinutes = 60,
+    int billingIncrementMinutes = 30,
+    int billingGraceMinutes = 10,
+    int? plannedMinutes,
   }) {
+    if (billingMode == 'min_1h_then_30' && plannedMinutes != null && plannedMinutes > 0) {
+      final billed = billableMinutesFromPlanned(
+        plannedMinutes: plannedMinutes,
+        minBillingMinutes: minBillingMinutes,
+        billingIncrementMinutes: billingIncrementMinutes,
+      );
+      final charge = (billed / 60) * hourlyRate;
+      if (rounding <= 0) return double.parse(charge.toStringAsFixed(2));
+      return double.parse(((charge / rounding).round() * rounding).toStringAsFixed(2));
+    }
+
     if (activeSeconds <= 0) return 0;
 
+    final billedMinutes = billableMinutes(
+      activeSeconds: activeSeconds,
+      billingMode: billingMode,
+      minBillingMinutes: minBillingMinutes,
+      billingIncrementMinutes: billingIncrementMinutes,
+      billingGraceMinutes: billingGraceMinutes,
+      plannedMinutes: plannedMinutes,
+    );
     double charge;
     switch (billingMode) {
       case 'block_30':
-        final minutes = (activeSeconds / 60).ceil();
-        final blocks = (minutes / 30).ceil();
-        charge = blocks * (hourlyRate / 2);
-        break;
       case 'block_60':
-        final minutes = (activeSeconds / 60).ceil();
-        final blocks = (minutes / 60).ceil();
-        charge = blocks * hourlyRate;
+      case 'min_1h_then_30':
+        charge = (billedMinutes / 60) * hourlyRate;
         break;
       default:
-        final minutes = (activeSeconds / 60).ceil();
-        charge = minutes * (hourlyRate / 60);
+        charge = billedMinutes * (hourlyRate / 60);
     }
 
     if (rounding <= 0) return double.parse(charge.toStringAsFixed(2));
-    return (charge / rounding).round() * rounding;
+    return double.parse(((charge / rounding).round() * rounding).toStringAsFixed(2));
   }
 
   static BillingPreview fromSessionData({

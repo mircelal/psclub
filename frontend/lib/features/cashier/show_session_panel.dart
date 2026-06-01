@@ -6,14 +6,21 @@ import '../../core/theme/cashier_theme_data.dart';
 import 'session_panel.dart';
 
 /// 13–24" ekranlar üçün geniş mərkəzlənmiş modal; kiçik ekranda tam en bottom sheet.
-void showSessionPanel(BuildContext context, WidgetRef ref, int sessionId, VoidCallback onChanged) {
+void showSessionPanel(
+  BuildContext context,
+  WidgetRef ref,
+  int sessionId,
+  VoidCallback onChanged, {
+  /// Birbaşa satış: ödəniş və ya səbət boşalana qədər bağlanmır.
+  bool lockUntilSettled = false,
+}) {
   final size = MediaQuery.sizeOf(context);
   final isWide = size.width >= 900;
 
   if (isWide) {
     showGeneralDialog(
       context: context,
-      barrierDismissible: true,
+      barrierDismissible: !lockUntilSettled,
       barrierLabel: 'Sessiya',
       barrierColor: Colors.black54,
       transitionDuration: const Duration(milliseconds: 280),
@@ -32,6 +39,7 @@ void showSessionPanel(BuildContext context, WidgetRef ref, int sessionId, VoidCa
                 sessionId: sessionId,
                 onChanged: onChanged,
                 isWideLayout: true,
+                lockUntilSettled: lockUntilSettled,
               ),
             ),
           ),
@@ -52,6 +60,8 @@ void showSessionPanel(BuildContext context, WidgetRef ref, int sessionId, VoidCa
   showModalBottomSheet(
     context: context,
     isScrollControlled: true,
+    isDismissible: !lockUntilSettled,
+    enableDrag: !lockUntilSettled,
     backgroundColor: Colors.transparent,
     useSafeArea: true,
     builder: (_) => DraggableScrollableSheet(
@@ -66,6 +76,7 @@ void showSessionPanel(BuildContext context, WidgetRef ref, int sessionId, VoidCa
           scrollController: scrollController,
           onChanged: onChanged,
           isWideLayout: false,
+          lockUntilSettled: lockUntilSettled,
         ),
       ),
     ),

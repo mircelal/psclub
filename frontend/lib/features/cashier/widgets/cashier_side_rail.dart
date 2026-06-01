@@ -22,7 +22,8 @@ class CashierSideRail extends StatelessWidget {
     required this.onRefresh,
     required this.onCounterSale,
     required this.onSettings,
-    required this.onShowShortcuts,
+    this.onShowShortcuts,
+    this.showKeyboardShortcuts = true,
     required this.onLogout,
     this.onAdmin,
     this.shift,
@@ -43,7 +44,8 @@ class CashierSideRail extends StatelessWidget {
   final VoidCallback onRefresh;
   final VoidCallback onCounterSale;
   final VoidCallback onSettings;
-  final VoidCallback onShowShortcuts;
+  final VoidCallback? onShowShortcuts;
+  final bool showKeyboardShortcuts;
   final VoidCallback onLogout;
   final VoidCallback? onAdmin;
   final Map<String, dynamic>? shift;
@@ -161,10 +163,11 @@ class CashierSideRail extends StatelessWidget {
               padding: const EdgeInsets.all(AppSpacing.md),
               child: _RailActions(
                 onRefresh: onRefresh,
-                onShowShortcuts: onShowShortcuts,
+                onShowShortcuts: showKeyboardShortcuts ? onShowShortcuts : null,
                 onSettings: onSettings,
                 onAdmin: onAdmin,
                 onLogout: onLogout,
+                showKeyboardHints: showKeyboardShortcuts,
               ),
             ),
           ],
@@ -222,25 +225,40 @@ class _UserTile extends StatelessWidget {
 class _RailActions extends StatelessWidget {
   const _RailActions({
     required this.onRefresh,
-    required this.onShowShortcuts,
     required this.onSettings,
     required this.onLogout,
+    this.onShowShortcuts,
     this.onAdmin,
+    this.showKeyboardHints = true,
   });
 
   final VoidCallback onRefresh;
-  final VoidCallback onShowShortcuts;
+  final VoidCallback? onShowShortcuts;
   final VoidCallback onSettings;
   final VoidCallback onLogout;
   final VoidCallback? onAdmin;
+  final bool showKeyboardHints;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
-        _ActionButton(icon: Icons.sync_rounded, tooltip: 'Yenilə (F5)', onTap: onRefresh),
-        _ActionButton(icon: Icons.keyboard_outlined, tooltip: 'Qısayollar (F1)', onTap: onShowShortcuts),
-        _ActionButton(icon: Icons.settings_outlined, tooltip: 'Görünüş (F9)', onTap: onSettings),
+        _ActionButton(
+          icon: Icons.sync_rounded,
+          tooltip: showKeyboardHints ? 'Yenilə (F5)' : 'Yenilə',
+          onTap: onRefresh,
+        ),
+        if (onShowShortcuts != null)
+          _ActionButton(
+            icon: Icons.keyboard_outlined,
+            tooltip: showKeyboardHints ? 'Qısayollar (F1)' : 'Qısayollar',
+            onTap: onShowShortcuts!,
+          ),
+        _ActionButton(
+          icon: Icons.settings_outlined,
+          tooltip: showKeyboardHints ? 'Görünüş (F9)' : 'Parametrlər',
+          onTap: onSettings,
+        ),
         if (onAdmin != null) _ActionButton(icon: Icons.admin_panel_settings_outlined, tooltip: 'Admin', onTap: onAdmin!),
         const Spacer(),
         _ActionButton(icon: Icons.logout_rounded, tooltip: 'Çıxış', onTap: onLogout, danger: true),
