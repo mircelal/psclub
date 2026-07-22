@@ -17,4 +17,15 @@ abstract final class TableSessionState {
 
   /// Hesab bağlana bilər (aktiv və ya pause sessiya var).
   static bool canCloseBill(Map<String, dynamic> table) => hasOpenSession(table);
+
+  /// Masa sessiyasını başqa boş masaya köçürmək mümkündürmü.
+  static bool canTransferSession(Map<String, dynamic> table, List<Map<String, dynamic>> allTables) {
+    if (!hasOpenSession(table)) return false;
+    if ((table['session_type'] as String?) == 'counter') return false;
+    final sourceTableId = jsonToInt(table['id']);
+    if (sourceTableId <= 0) return false;
+    return allTables.any(
+      (t) => canOpenSession(t) && jsonToInt(t['id']) != sourceTableId,
+    );
+  }
 }

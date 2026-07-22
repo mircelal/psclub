@@ -14,3 +14,16 @@ int? jsonToIntOrNull(dynamic value) {
 }
 
 int jsonToInt(dynamic value, [int fallback = 0]) => jsonToIntOrNull(value) ?? fallback;
+
+/// MySQL boolean: 1, "1", true → aktiv; 0, "0", false, null → deaktiv.
+bool jsonIsActive(dynamic value, {bool defaultActive = true}) {
+  if (value == null) return defaultActive;
+  if (value is bool) return value;
+  if (value is num) return value != 0;
+  if (value is String) {
+    final v = value.trim().toLowerCase();
+    if (v == '1' || v == 'true') return true;
+    if (v == '0' || v == 'false') return false;
+  }
+  return defaultActive;
+}

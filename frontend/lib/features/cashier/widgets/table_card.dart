@@ -255,7 +255,7 @@ class _ActiveBody extends StatelessWidget {
             ),
           ),
         ),
-        if (!compact && !mobile && ((isPackage && bill.timeCharge > 0) || (timeBillingEnabled && bill.timeCharge > 0) || bill.productsTotal > 0 || live.discount > 0)) ...[
+        if (!compact && !mobile && ((isPackage && bill.timeCharge > 0) || (timeBillingEnabled && bill.timeCharge > 0) || bill.productsTotal > 0 || live.discount > 0 || live.loyaltyCredit != null)) ...[
           const SizedBox(height: 6),
           Row(
             children: [
@@ -272,6 +272,16 @@ class _ActiveBody extends StatelessWidget {
                   child: _BreakdownChip(
                     label: live.promotionName != null ? 'Endirim' : 'Endirim',
                     amount: live.discount,
+                    color: const Color(0xFF34C759),
+                  ),
+                ),
+              ],
+              if (live.loyaltyCredit != null) ...[
+                if (bill.timeCharge > 0 || bill.productsTotal > 0 || live.discount > 0) const SizedBox(width: 6),
+                Expanded(
+                  child: _BreakdownChip(
+                    label: 'Bonus',
+                    amount: live.loyaltyCredit!,
                     color: const Color(0xFF34C759),
                   ),
                 ),
@@ -319,7 +329,7 @@ class _ActiveBody extends StatelessWidget {
             ],
           ),
         ),
-        if (mobile && ((isPackage && bill.timeCharge > 0) || (timeBillingEnabled && bill.timeCharge > 0) || bill.productsTotal > 0 || live.discount > 0)) ...[
+        if (mobile && ((isPackage && bill.timeCharge > 0) || (timeBillingEnabled && bill.timeCharge > 0) || bill.productsTotal > 0 || live.discount > 0 || live.loyaltyCredit != null)) ...[
           const SizedBox(height: 4),
           Text(
             [
@@ -327,6 +337,7 @@ class _ActiveBody extends StatelessWidget {
               if (!isPackage && timeBillingEnabled && bill.timeCharge > 0) 'Vaxt ${bill.timeCharge.toStringAsFixed(2)}',
               if (bill.productsTotal > 0) 'Məhsul ${bill.productsTotal.toStringAsFixed(2)}',
               if (live.discount > 0) 'Endirim -${live.discount.toStringAsFixed(2)}',
+              if (live.loyaltyCredit != null) 'Bonus -${live.loyaltyCredit!.toStringAsFixed(2)}',
             ].join(' · '),
             style: CashierTheme.caption(context),
             maxLines: 1,
@@ -535,6 +546,8 @@ class BillSummaryCard extends StatelessWidget {
     this.promotionName,
     this.timeLabel,
     this.timeChargeLabel,
+    this.loyaltyCredit,
+    this.compact = false,
   });
 
   final double timeCharge;
@@ -545,11 +558,13 @@ class BillSummaryCard extends StatelessWidget {
   final int activeMinutes;
   final String? timeLabel;
   final String? timeChargeLabel;
+  final double? loyaltyCredit;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(AppSpacing.lg),
+      padding: EdgeInsets.all(compact ? AppSpacing.md : AppSpacing.lg),
       decoration: BoxDecoration(
         color: CashierTheme.surface(context),
         borderRadius: BorderRadius.circular(CashierTheme.radiusCard),
@@ -579,9 +594,13 @@ class BillSummaryCard extends StatelessWidget {
               prefixMinus: true,
             ),
           ],
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
-            child: Divider(height: 1),
+          if (loyaltyCredit != null && loyaltyCredit! > 0) ...[
+            const SizedBox(height: AppSpacing.sm),
+            _row(context, 'Loyallıq bonusu', loyaltyCredit!, negative: true, prefixMinus: true),
+          ],
+          Padding(
+            padding: EdgeInsets.symmetric(vertical: compact ? AppSpacing.sm : AppSpacing.md),
+            child: const Divider(height: 1),
           ),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -589,7 +608,7 @@ class BillSummaryCard extends StatelessWidget {
               Text('ÜMUMİ', style: Theme.of(context).textTheme.labelLarge),
               MoneyText(
                 amount: total,
-                size: MoneySize.large,
+                size: compact ? MoneySize.medium : MoneySize.large,
                 color: Theme.of(context).brightness == Brightness.light
                     ? const Color(0xFF34C759)
                     : AppColors.accent,

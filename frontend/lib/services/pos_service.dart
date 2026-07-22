@@ -233,6 +233,37 @@ class PosService {
     await _api.delete('/customer-groups/$id');
   }
 
+  Future<List<dynamic>> getLoyaltyTiers() async {
+    final res = await _api.get('/loyalty/tiers');
+    return res['data'] as List<dynamic>;
+  }
+
+  Future<void> createLoyaltyTier(Map<String, dynamic> data) async {
+    await _api.post('/loyalty/tiers', data: data);
+  }
+
+  Future<void> updateLoyaltyTier(int id, Map<String, dynamic> data) async {
+    await _api.put('/loyalty/tiers/$id', data: data);
+  }
+
+  Future<void> deleteLoyaltyTier(int id) async {
+    await _api.delete('/loyalty/tiers/$id');
+  }
+
+  Future<Map<String, dynamic>> grantCustomerLoyalty(
+    int customerId, {
+    required String kind,
+    required double value,
+    String? note,
+  }) async {
+    final res = await _api.post('/customers/$customerId/loyalty/grant', data: {
+      'kind': kind,
+      'value': value,
+      if (note != null && note.isNotEmpty) 'note': note,
+    });
+    return res['data'] as Map<String, dynamic>;
+  }
+
   Future<Map<String, dynamic>> getSession(int id) async {
     final res = await _api.get('/sessions/$id');
     return _unwrapSessionPayload(res['data']);
@@ -285,8 +316,29 @@ class PosService {
     return res['data'] as Map<String, dynamic>;
   }
 
-  Future<Map<String, dynamic>> previewBill(int id) async {
-    final res = await _api.get('/sessions/$id/preview');
+  Future<Map<String, dynamic>> transferSession(
+    int sessionId, {
+    required int targetTableId,
+    required String tariffMode,
+    int? tariffId,
+  }) async {
+    final res = await _api.patch('/sessions/$sessionId/transfer', data: {
+      'target_table_id': targetTableId,
+      'tariff_mode': tariffMode,
+      if (tariffId != null) 'tariff_id': tariffId,
+    });
+    return res['data'] as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> previewBill(
+    int id, {
+    int redeemBonusMinutes = 0,
+    double redeemBonusWallet = 0,
+  }) async {
+    final res = await _api.get('/sessions/$id/preview', query: {
+      if (redeemBonusMinutes > 0) 'redeem_bonus_minutes': redeemBonusMinutes,
+      if (redeemBonusWallet > 0) 'redeem_bonus_wallet': redeemBonusWallet,
+    });
     return res['data'] as Map<String, dynamic>;
   }
 
@@ -295,11 +347,15 @@ class PosService {
     required String method,
     double cashAmount = 0,
     double cardAmount = 0,
+    int redeemBonusMinutes = 0,
+    double redeemBonusWallet = 0,
   }) async {
     final res = await _api.post('/sessions/$id/close', data: {
       'method': method,
       'cash_amount': cashAmount,
       'card_amount': cardAmount,
+      if (redeemBonusMinutes > 0) 'redeem_bonus_minutes': redeemBonusMinutes,
+      if (redeemBonusWallet > 0) 'redeem_bonus_wallet': redeemBonusWallet,
     });
     return res['data'] as Map<String, dynamic>;
   }
@@ -336,6 +392,14 @@ class PosService {
 
   Future<void> updateProduct(int id, Map<String, dynamic> data) async {
     await _api.put('/products/$id', data: data);
+  }
+
+  Future<Map<String, dynamic>> getProductProfile(int id, {String? from, String? to}) async {
+    final query = <String, String>{};
+    if (from != null) query['from'] = from;
+    if (to != null) query['to'] = to;
+    final res = await _api.get('/products/$id', query: query.isEmpty ? null : query);
+    return res['data'] as Map<String, dynamic>;
   }
 
   Future<String> uploadProductImageMultipart(int productId, MultipartFile file) async {
@@ -462,13 +526,18 @@ class PosService {
     return res['data'] as Map<String, dynamic>;
   }
 
+  Future<Map<String, dynamic>> removeOrderItems(int id, List<Map<String, dynamic>> items) async {
+    final res = await _api.post('/orders/$id/items', data: {'items': items});
+    return res['data'] as Map<String, dynamic>;
+  }
+
   Future<Map<String, dynamic>> refundOrder(int id, Map<String, dynamic> data) async {
     final res = await _api.post('/orders/$id/refund', data: data);
     return res['data'] as Map<String, dynamic>;
   }
 
   Future<Map<String, dynamic>> deleteOrder(int id, Map<String, dynamic> data) async {
-    final res = await _api.delete('/orders/$id', data: data);
+    final res = await _api.post('/orders/$id/delete', data: data);
     return res['data'] as Map<String, dynamic>;
   }
 

@@ -230,7 +230,7 @@ class _OpenTableBodyState extends ConsumerState<_OpenTableBody> {
           ),
           const SizedBox(height: AppSpacing.sm),
           Text(
-            'Geri sayım bitəndə masa aktiv qalır; uzatma ${config.extendStepMinutes} dəq addımlarla mümkündür.',
+            'Geri sayım bitəndə masa aktiv qalır; vaxt istənilən anda ${config.extendStepMinutes} dəq addımlarla uzadıla bilər.',
             style: theme.textTheme.bodySmall,
           ),
         ] else if (_mode == _OpenMode.set)

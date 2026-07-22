@@ -25,7 +25,12 @@ import '../utils/session_datetime.dart';
       final serverRem = jsonToIntOrNull(billPreview['remaining_seconds']);
       final baseRem = serverRem ?? (plannedSecs - serverActive);
       remaining = (baseRem - tick).clamp(0, plannedSecs);
-      activeSeconds = plannedSecs - remaining;
+      // Plan bitdikdən sonra aktiv saniyə plannedSecs-də dayanır — overtime yoxdur.
+      if (remaining > 0) {
+        activeSeconds = plannedSecs - remaining;
+      } else {
+        activeSeconds = plannedSecs;
+      }
     }
 
     return (activeSeconds: activeSeconds, remainingSeconds: remaining);
@@ -40,7 +45,8 @@ import '../utils/session_datetime.dart';
   if (plannedSecs != null) {
     final endUtc = openedUtc.add(Duration(seconds: plannedSecs));
     final remaining = endUtc.difference(now).inSeconds.clamp(0, plannedSecs);
-    return (activeSeconds: plannedSecs - remaining, remainingSeconds: remaining);
+    final active = now.difference(openedUtc).inSeconds.clamp(0, plannedSecs);
+    return (activeSeconds: active, remainingSeconds: remaining);
   }
 
   final active = now.difference(openedUtc).inSeconds.clamp(0, 999999);

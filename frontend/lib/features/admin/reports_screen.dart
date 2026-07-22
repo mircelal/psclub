@@ -78,6 +78,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
     final summary = _report!['summary'] as Map<String, dynamic>? ?? {};
     final payments = _report!['payments'] as List<dynamic>? ?? [];
     final products = _report!['product_breakdown'] as List<dynamic>? ?? [];
+    final expenses = _report!['expenses'] as List<dynamic>? ?? [];
 
     return ListView(
       padding: const EdgeInsets.all(AppSpacing.xxl),
@@ -95,6 +96,14 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
             Expanded(child: StatCard(label: 'Vaxt gəliri', value: '${summary['time_revenue'] ?? 0}', isMoney: true, color: AppColors.primary)),
             const SizedBox(width: AppSpacing.md),
             Expanded(child: StatCard(label: 'Məhsul gəliri', value: '${summary['products_revenue'] ?? 0}', isMoney: true, color: AppColors.info)),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.md),
+        Row(
+          children: [
+            Expanded(child: StatCard(label: 'Xərc', value: '${summary['expenses_total'] ?? 0}', isMoney: true, color: AppColors.danger)),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(child: StatCard(label: 'Net', value: (jsonToDouble(summary['total_revenue']) - jsonToDouble(summary['expenses_total'])).toStringAsFixed(2), isMoney: true, color: AppColors.success)),
           ],
         ),
         const SizedBox(height: AppSpacing.xxl),
@@ -119,6 +128,22 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
             trailing: MoneyText(amount: jsonToDouble(m['revenue']), size: MoneySize.small),
           );
         }),
+        if (expenses.isNotEmpty) ...[
+          const SizedBox(height: AppSpacing.xxl),
+          Text('Xərclər', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: AppSpacing.md),
+          ...expenses.map((e) {
+            final m = e as Map<String, dynamic>;
+            final desc = m['description']?.toString() ?? '';
+            final category = m['category']?.toString() ?? '';
+            return AdminListTile(
+              leading: const Icon(Icons.receipt_long_outlined, color: AppColors.danger, size: 20),
+              title: desc.isNotEmpty ? desc : (category.isNotEmpty ? category : 'Xərc'),
+              subtitle: category,
+              trailing: MoneyText(amount: jsonToDouble(m['total']), size: MoneySize.small, color: AppColors.danger),
+            );
+          }),
+        ],
       ],
     );
   }

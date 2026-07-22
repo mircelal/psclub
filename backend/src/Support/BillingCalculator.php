@@ -6,6 +6,18 @@ namespace App\Support;
 
 final class BillingCalculator
 {
+    /**
+     * Müddətli sessiya: aktiv vaxt planlaşdırılan müddəti keçməməlidir (overtime hesablanmır).
+     */
+    public function capActiveSecondsForPlanned(int $activeSeconds, ?int $plannedMinutes): int
+    {
+        if ($plannedMinutes === null || $plannedMinutes <= 0) {
+            return $activeSeconds;
+        }
+
+        return min($activeSeconds, $plannedMinutes * 60);
+    }
+
     public function calculateTimeCharge(
         int $activeSeconds,
         float $hourlyRate,
@@ -17,13 +29,18 @@ final class BillingCalculator
         ?int $plannedMinutes = null
     ): float {
         if ($billingMode === 'min_1h_then_30' && $plannedMinutes !== null && $plannedMinutes > 0) {
-            $billed = $this->billableMinutesFromPlanned(
+            $prepaidMinutes = $this->billableMinutesFromPlanned(
                 $plannedMinutes,
                 max(1, $minBillingMinutes),
                 max(1, $billingIncrementMinutes)
             );
+            $charge = $hourlyRate * ($prepaidMinutes / 60);
 
-            return $this->roundAmount($hourlyRate * ($billed / 60), $rounding);
+            return $this->roundAmount($charge, $rounding);
+        }
+
+        if ($plannedMinutes !== null && $plannedMinutes > 0) {
+            $activeSeconds = $this->capActiveSecondsForPlanned($activeSeconds, $plannedMinutes);
         }
 
         if ($activeSeconds <= 0) {

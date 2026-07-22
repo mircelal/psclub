@@ -180,9 +180,11 @@ final class ShiftsController
         $to = $params['to'] ?? date('Y-m-d');
         $limit = min(100, max(10, (int) ($params['limit'] ?? 50)));
 
-        $sql = 'SELECT s.*, ou.full_name AS opened_by_name, cu.full_name AS closed_by_name
+        $sql = 'SELECT s.*,
+                       COALESCE(ou.full_name, ou.username, \'Silinmiş istifadəçi\') AS opened_by_name,
+                       COALESCE(cu.full_name, cu.username) AS closed_by_name
                 FROM shifts s
-                JOIN users ou ON ou.id = s.opened_by
+                LEFT JOIN users ou ON ou.id = s.opened_by
                 LEFT JOIN users cu ON cu.id = s.closed_by
                 WHERE s.business_id = ?
                   AND DATE(s.opened_at) BETWEEN ? AND ?';

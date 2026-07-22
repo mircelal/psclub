@@ -373,6 +373,7 @@ class _OrderDetailRightColumn extends StatelessWidget {
     required this.discountMode,
     required this.computedDiscount,
     required this.discountAppliesTo,
+    required this.onRemoveItem,
     required this.onDiscountModeChanged,
     required this.onRecalc,
   });
@@ -387,6 +388,7 @@ class _OrderDetailRightColumn extends StatelessWidget {
   final String discountMode;
   final double computedDiscount;
   final String discountAppliesTo;
+  final void Function(Map<String, dynamic> item, int quantity, String mode) onRemoveItem;
   final ValueChanged<String> onDiscountModeChanged;
   final VoidCallback onRecalc;
 
@@ -395,7 +397,11 @@ class _OrderDetailRightColumn extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _OrderItemsSection(items: items),
+        _OrderItemsSection(
+          items: items,
+          isRefunded: isRefunded,
+          onRemove: onRemoveItem,
+        ),
         if (!isRefunded) ...[
           const SizedBox(height: AppSpacing.xl),
           _OrderAdjustSection(
@@ -430,6 +436,7 @@ class _OrderDetailSingleColumn extends StatelessWidget {
     required this.discountMode,
     required this.computedDiscount,
     required this.discountAppliesTo,
+    required this.onRemoveItem,
     required this.onDiscountModeChanged,
     required this.onRecalc,
   });
@@ -446,6 +453,7 @@ class _OrderDetailSingleColumn extends StatelessWidget {
   final String discountMode;
   final double computedDiscount;
   final String discountAppliesTo;
+  final void Function(Map<String, dynamic> item, int quantity, String mode) onRemoveItem;
   final ValueChanged<String> onDiscountModeChanged;
   final VoidCallback onRecalc;
 
@@ -460,7 +468,11 @@ class _OrderDetailSingleColumn extends StatelessWidget {
           _PaymentInfoCard(payment: payment!),
         ],
         const SizedBox(height: AppSpacing.lg),
-        _OrderItemsSection(items: items),
+        _OrderItemsSection(
+          items: items,
+          isRefunded: isRefunded,
+          onRemove: onRemoveItem,
+        ),
         if (!isRefunded) ...[
           const SizedBox(height: AppSpacing.xl),
           _OrderAdjustSection(
@@ -535,13 +547,20 @@ class _PaymentInfoCard extends StatelessWidget {
 }
 
 class _OrderItemsSection extends StatelessWidget {
-  const _OrderItemsSection({required this.items});
+  const _OrderItemsSection({
+    required this.items,
+    required this.isRefunded,
+    required this.onRemove,
+  });
 
   final List<dynamic> items;
+  final bool isRefunded;
+  final void Function(Map<String, dynamic> item, int quantity, String mode) onRemove;
 
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
+
     return Container(
       padding: const EdgeInsets.all(AppSpacing.lg),
       decoration: BoxDecoration(
@@ -559,15 +578,57 @@ class _OrderItemsSection extends StatelessWidget {
           else
             ...items.map((raw) {
               final i = raw as Map<String, dynamic>;
-              final lineTotal = jsonToDouble(i['unit_price']) * jsonToInt(i['quantity'], 1);
+              final qty = jsonToInt(i['quantity'], 1);
+              final returned = jsonToInt(i['returned_quantity']);
+              final deleted = jsonToInt(i['deleted_quantity']);
+              final active = qty - returned - deleted;
+              final unitPrice = jsonToDouble(i['unit_price']);
+              final lineTotal = unitPrice * active;
+              final fullyRemoved = active <= 0;
+
               return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 6),
+                padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(child: Text(i['product_name'] as String, style: const TextStyle(fontWeight: FontWeight.w500))),
-                    Text('${i['quantity']} × ${jsonToDouble(i['unit_price']).toStringAsFixed(2)}', style: Theme.of(context).textTheme.bodySmall),
-                    const SizedBox(width: AppSpacing.md),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            i['product_name'] as String,
+                            style: TextStyle(
+                              fontWeight: FontWeight.w500,
+                              decoration: fullyRemoved ? TextDecoration.lineThrough : null,
+                              color: fullyRemoved ? p.textMuted : null,
+                            ),
+                          ),
+                          if (returned > 0 || deleted > 0)
+                            Text(
+                              [
+                                if (returned > 0) 'Qaytarılıb: $returned',
+                                if (deleted > 0) 'Silinib: $deleted',
+                              ].join(' • '),
+                              style: TextStyle(fontSize: 11, color: p.textMuted),
+                            ),
+                          Text(
+                            '$active × ${unitPrice.toStringAsFixed(2)} ₼',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                    ),
                     Text('${lineTotal.toStringAsFixed(2)} ₼', style: const TextStyle(fontWeight: FontWeight.w600)),
+                    if (!isRefunded && active > 0) ...[
+                      const SizedBox(width: AppSpacing.sm),
+                      IconButton(
+                        onPressed: () => _showRemoveDialog(context, i),
+                        icon: const Icon(Icons.remove_circle_outline),
+                        color: AppColors.warning,
+                        tooltip: 'Çıxar',
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ],
                   ],
                 ),
               );
@@ -575,6 +636,78 @@ class _OrderItemsSection extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  Future<void> _showRemoveDialog(BuildContext context, Map<String, dynamic> item) async {
+    final qty = jsonToInt(item['quantity'], 1);
+    final returned = jsonToInt(item['returned_quantity']);
+    final deleted = jsonToInt(item['deleted_quantity']);
+    final active = qty - returned - deleted;
+    final unitPrice = jsonToDouble(item['unit_price']);
+
+    var selectedQty = active;
+    var mode = 'return';
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setState) {
+          return AlertDialog(
+            title: const Text('Məhsulu çıxar'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('${item['product_name']} — ${unitPrice.toStringAsFixed(2)} ₼/əd'),
+                const SizedBox(height: AppSpacing.md),
+                Text('Miqdar:', style: Theme.of(context).textTheme.bodySmall),
+                const SizedBox(height: AppSpacing.xs),
+                Row(
+                  children: [
+                    IconButton(
+                      onPressed: selectedQty > 1 ? () => setState(() => selectedQty--) : null,
+                      icon: const Icon(Icons.remove),
+                    ),
+                    Text('$selectedQty', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+                    IconButton(
+                      onPressed: selectedQty < active ? () => setState(() => selectedQty++) : null,
+                      icon: const Icon(Icons.add),
+                    ),
+                    Text('/ $active', style: TextStyle(color: context.palette.textMuted)),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.md),
+                SegmentedButton<String>(
+                  segments: const [
+                    ButtonSegment(value: 'return', label: Text('Qaytar')),
+                    ButtonSegment(value: 'delete', label: Text('Sil')),
+                  ],
+                  selected: {mode},
+                  onSelectionChanged: (s) => setState(() => mode = s.first),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                Text(
+                  'Cəmi: ${(selectedQty * unitPrice).toStringAsFixed(2)} ₼',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Ləğv et')),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                style: FilledButton.styleFrom(backgroundColor: AppColors.warning),
+                child: const Text('Təsdiqlə'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (confirmed == true && selectedQty > 0) {
+      onRemove(item, selectedQty, mode);
+    }
   }
 }
 
@@ -743,7 +876,9 @@ class _OrderDetailDialogState extends ConsumerState<_OrderDetailDialog> {
   @override
   void initState() {
     super.initState();
-    _discountAppliesTo = widget.order['discount_applies_to'] as String? ?? 'time_only';
+    final isCounter = (widget.order['session_type'] as String?) == 'counter';
+    final storedApplies = widget.order['discount_applies_to'] as String? ?? 'time_only';
+    _discountAppliesTo = isCounter ? 'all' : storedApplies;
     final type = widget.order['discount_type'] as String? ?? 'none';
     final value = jsonToDouble(widget.order['discount_value']);
     final discountAmt = jsonToDouble(widget.order['discount']);
@@ -823,6 +958,35 @@ class _OrderDetailDialogState extends ConsumerState<_OrderDetailDialog> {
     _recalcTotal();
   }
 
+  Future<void> _onRemoveItem(Map<String, dynamic> item, int quantity, String mode) async {
+    setState(() => _busy = true);
+    try {
+      final result = await ref.read(posServiceProvider).removeOrderItems(jsonToInt(widget.order['id']), [
+        {'item_id': jsonToInt(item['id']), 'quantity': quantity, 'mode': mode},
+      ]);
+      refreshCurrentShift(ref);
+      ref.invalidate(productsProvider);
+      if (mounted) {
+        var msg = mode == 'return' ? 'Məhsul qaytarıldı' : 'Məhsul silindi';
+        final summary = result['items_remove_summary'] as Map<String, dynamic>?;
+        if (summary != null) {
+          final cash = jsonToDouble(summary['cash_refunded']);
+          final card = jsonToDouble(summary['card_refunded']);
+          if (cash > 0 || card > 0) {
+            msg += ' — nağd: ${cash.toStringAsFixed(2)} ₼';
+            if (card > 0) msg += ', kart: ${card.toStringAsFixed(2)} ₼';
+          }
+        }
+        showAppSnackBar(context, msg);
+        widget.onChanged();
+      }
+    } catch (e) {
+      if (mounted) showAppSnackBar(context, ApiClient.messageFromError(e), isError: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Map<String, dynamic> _adjustPayload() {
     final input = double.tryParse(_discInputCtrl.text.replaceAll(',', '.')) ?? 0;
     final payload = <String, dynamic>{
@@ -889,6 +1053,9 @@ class _OrderDetailDialogState extends ConsumerState<_OrderDetailDialog> {
         'restore_stock': _restoreStock,
         'admin_note': _noteCtrl.text.trim(),
       });
+      if (result['deleted'] != true) {
+        throw Exception('Sifariş silinmədi — server cavabı gözlənilməzdir');
+      }
       refreshCurrentShift(ref);
       ref.invalidate(productsProvider);
       if (mounted) {
@@ -1030,6 +1197,7 @@ class _OrderDetailDialogState extends ConsumerState<_OrderDetailDialog> {
                               discountMode: _discountMode,
                               computedDiscount: _computedDiscount,
                               discountAppliesTo: _discountAppliesTo,
+                              onRemoveItem: _onRemoveItem,
                               onDiscountModeChanged: _onDiscountModeChanged,
                               onRecalc: _recalcTotal,
                             ),
@@ -1049,6 +1217,7 @@ class _OrderDetailDialogState extends ConsumerState<_OrderDetailDialog> {
                         discountMode: _discountMode,
                         computedDiscount: _computedDiscount,
                         discountAppliesTo: _discountAppliesTo,
+                        onRemoveItem: _onRemoveItem,
                         onDiscountModeChanged: _onDiscountModeChanged,
                         onRecalc: _recalcTotal,
                       ),

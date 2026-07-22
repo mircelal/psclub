@@ -9,6 +9,7 @@ use App\Modules\Stock\StockController;
 use App\Support\ApiResponse;
 use App\Support\DiscountCalculator;
 use App\Support\SchemaMigrator;
+use App\Support\StockMovementLabels;
 use PDO;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -105,9 +106,13 @@ final class OrdersController
 
         $timeCharge = (float) ($body['time_charge'] ?? $order['time_charge']);
         $productsTotal = (float) ($body['products_total'] ?? $order['products_total']);
+        $isCounter = ($order['session_type'] ?? 'table') === 'counter';
         $appliesTo = $body['discount_applies_to'] ?? $order['discount_applies_to'] ?? 'time_only';
         if (!in_array($appliesTo, ['all', 'time_only'], true)) {
             $appliesTo = 'time_only';
+        }
+        if ($isCounter && $appliesTo === 'time_only') {
+            $appliesTo = 'all';
         }
 
         $discountType = $body['discount_type'] ?? $order['discount_type'] ?? 'none';
@@ -259,6 +264,9 @@ final class OrdersController
         if ($order['order_state'] === 'refunded') {
             return ApiResponse::error('Already refunded', 400);
         }
+        if ($order['order_state'] === 'deleted') {
+            return ApiResponse::error('Silinmiş sifariş qaytarıla bilməz', 400);
+        }
 
         $total = (float) $order['total_amount'];
         $refundAmount = isset($body['amount']) ? round((float) $body['amount'], 2) : $total;
@@ -296,20 +304,26 @@ final class OrdersController
         $this->pdo->beginTransaction();
         try {
             if ($restoreStock) {
+                $adminLabel = StockMovementLabels::actorLabel($user['full_name'] ?? null, $user['username'] ?? null);
                 $items = $this->pdo->prepare('SELECT * FROM session_items WHERE session_id = ?');
                 $items->execute([$id]);
                 foreach ($items->fetchAll() as $item) {
+                    if (!empty($item['is_set_item'])) {
+                        continue;
+                    }
+                    $productId = (int) ($item['product_id'] ?? 0);
                     $qty = (int) $item['quantity'];
-                    if ($qty > 0) {
+                    $productName = (string) ($item['product_name'] ?? 'Məhsul');
+                    if ($productId > 0 && $qty > 0) {
                         $this->stock->applyStockChange(
-                            (int) $item['product_id'],
+                            $productId,
                             'in',
                             $qty,
-                            'return',
+                            'refund',
                             'refund',
                             $id,
                             (int) $user['id'],
-                            'Refund session #' . $id
+                            sprintf('%s qaytardı: %s +%d (sifariş #%d)', $adminLabel, $productName, $qty, $id)
                         );
                     }
                 }
@@ -384,6 +398,7 @@ final class OrdersController
         if (!$order || $order['status'] !== 'closed') {
             return ApiResponse::error('Order not found', 404);
         }
+        SchemaMigrator::ensureOrderDeletedState($this->pdo);
         if ($order['order_state'] === 'deleted') {
             return ApiResponse::error('Sifariş artıq silinib', 400);
         }
@@ -418,6 +433,7 @@ final class OrdersController
         $this->pdo->beginTransaction();
         try {
             if ($restoreStock) {
+                $adminLabel = StockMovementLabels::actorLabel($user['full_name'] ?? null, $user['username'] ?? null);
                 $items = $this->pdo->prepare('SELECT * FROM session_items WHERE session_id = ?');
                 $items->execute([$id]);
                 foreach ($items->fetchAll() as $item) {
@@ -426,16 +442,17 @@ final class OrdersController
                     }
                     $productId = (int) ($item['product_id'] ?? 0);
                     $qty = (int) $item['quantity'];
+                    $productName = (string) ($item['product_name'] ?? 'Məhsul');
                     if ($productId > 0 && $qty > 0) {
                         $this->stock->applyStockChange(
                             $productId,
                             'in',
                             $qty,
-                            'in',
+                            'order_delete',
                             'order_delete',
                             $id,
                             (int) $user['id'],
-                            'Deleted order #' . $id
+                            sprintf('%s sildi: %s +%d (sifariş #%d)', $adminLabel, $productName, $qty, $id)
                         );
                     }
                 }
@@ -504,6 +521,210 @@ final class OrdersController
                 'removed_from_current_shift' => $inCurrentShiftWindow,
             ],
         ]);
+    }
+
+    public function removeItems(Request $request, Response $response, array $args): Response
+    {
+        $id = (int) $args['id'];
+        $body = (array) $request->getParsedBody();
+        $user = $request->getAttribute('user');
+        $businessId = (int) $user['business_id'];
+
+        $order = $this->fetchOrder($id);
+        if (!$order || $order['status'] !== 'closed') {
+            return ApiResponse::error('Order not found', 404);
+        }
+        if (in_array($order['order_state'], ['refunded', 'deleted'], true)) {
+            return ApiResponse::error('Qaytarılmış və ya silinmiş sifarişdə əməliyyat aparıla bilməz', 400);
+        }
+
+        $itemsData = $body['items'] ?? [];
+        if (!is_array($itemsData) || $itemsData === []) {
+            return ApiResponse::error('Items required', 422);
+        }
+
+        $itemsStmt = $this->pdo->prepare('SELECT * FROM session_items WHERE session_id = ? AND id = ?');
+        $operations = [];
+        $totalRemovedGross = 0.0;
+        foreach ($itemsData as $op) {
+            $itemId = (int) ($op['item_id'] ?? 0);
+            $qty = (int) ($op['quantity'] ?? 0);
+            $mode = (string) ($op['mode'] ?? '');
+            if ($itemId <= 0 || $qty <= 0 || !in_array($mode, ['return', 'delete'], true)) {
+                return ApiResponse::error('Invalid item operation', 422);
+            }
+            $itemsStmt->execute([$id, $itemId]);
+            $item = $itemsStmt->fetch();
+            if (!$item) {
+                return ApiResponse::error('Item not found', 404);
+            }
+            $activeQty = (int) $item['quantity'] - (int) ($item['returned_quantity'] ?? 0) - (int) ($item['deleted_quantity'] ?? 0);
+            if ($qty > $activeQty) {
+                return ApiResponse::error('Quantity exceeds active amount', 422);
+            }
+            $lineAmount = round($qty * (float) $item['unit_price'], 2);
+            $totalRemovedGross += $lineAmount;
+            $operations[] = [
+                'item' => $item,
+                'qty' => $qty,
+                'mode' => $mode,
+                'line_amount' => $lineAmount,
+            ];
+        }
+
+        $paymentStmt = $this->pdo->prepare('SELECT * FROM payments WHERE session_id = ? LIMIT 1');
+        $paymentStmt->execute([$id]);
+        $payment = $paymentStmt->fetch();
+        if (!$payment) {
+            return ApiResponse::error('Payment not found for this order', 404);
+        }
+
+        $totalRemovedGross = round($totalRemovedGross, 2);
+
+        $openShift = $this->shifts->getOpenShift($businessId);
+        $closedAt = (string) ($order['closed_at'] ?? '');
+        $inCurrentShiftWindow = $openShift !== null
+            && $closedAt !== ''
+            && RefundCalculator::sessionInShiftWindow($closedAt, $openShift);
+
+        $shiftMovementId = null;
+        $oldProductsTotal = (float) $order['products_total'];
+        $oldTotal = round((float) $order['total_amount'], 2);
+        $timeCharge = (float) $order['time_charge'];
+        $discount = (float) $order['discount'];
+        $cashRefund = 0.0;
+        $cardRefund = 0.0;
+        $netRefundAmount = 0.0;
+        $newProductsTotal = $oldProductsTotal;
+        $newTotal = $oldTotal;
+        $discountType = (string) ($order['discount_type'] ?? 'none');
+        $discountValue = (float) ($order['discount_value'] ?? 0);
+        $discountAppliesTo = (string) ($order['discount_applies_to'] ?? 'time_only');
+
+        $this->pdo->beginTransaction();
+        try {
+            $adminLabel = StockMovementLabels::actorLabel($user['full_name'] ?? null, $user['username'] ?? null);
+            foreach ($operations as $op) {
+                $item = $op['item'];
+                $qty = $op['qty'];
+                $mode = $op['mode'];
+                $column = $mode === 'return' ? 'returned_quantity' : 'deleted_quantity';
+                $refType = $mode === 'return' ? 'refund' : 'order_delete';
+
+                $this->pdo->prepare(
+                    "UPDATE session_items SET {$column} = {$column} + ? WHERE id = ?"
+                )->execute([$qty, (int) $item['id']]);
+
+                $productId = (int) ($item['product_id'] ?? 0);
+                $productName = (string) ($item['product_name'] ?? 'Məhsul');
+                if ($productId > 0 && $qty > 0 && empty($item['is_set_item'])) {
+                    $this->stock->applyStockChange(
+                        $productId,
+                        'in',
+                        $qty,
+                        $refType,
+                        $refType,
+                        $id,
+                        (int) $user['id'],
+                        sprintf(
+                            '%s %s: %s +%d (sifariş #%d)',
+                            $adminLabel,
+                            $mode === 'return' ? 'qaytardı' : 'sildi',
+                            $productName,
+                            $qty,
+                            $id
+                        )
+                    );
+                }
+            }
+
+            $newProductsTotal = round($oldProductsTotal - $totalRemovedGross, 2);
+            $newSubtotal = round($timeCharge + $newProductsTotal, 2);
+            $newDiscount = $discount;
+            if ($discountType !== 'none') {
+                $discountBase = $discountAppliesTo === 'time_only' ? $timeCharge : $newSubtotal;
+                $newDiscount = DiscountCalculator::amount($discountBase, $discountType, $discountValue);
+            } else {
+                $newDiscount = min($discount, $newSubtotal);
+            }
+            $newDiscount = round(max(0, $newDiscount), 2);
+            $newTotal = round($newSubtotal - $newDiscount, 2);
+            if ($newTotal < 0) {
+                $newDiscount = round($newSubtotal, 2);
+                $newTotal = 0;
+            }
+            $newTotal = max(0, $newTotal);
+            $netRefundAmount = round(max(0, $oldTotal - $newTotal), 2);
+            $split = RefundCalculator::splitRefund($netRefundAmount, $payment);
+            $cashRefund = $split['cash_refund'];
+            $cardRefund = $split['card_refund'];
+            if ($cashRefund > 0 && $openShift === null) {
+                throw new \RuntimeException('Nağd qaytarma üçün açıq növbə lazımdır');
+            }
+
+            $newCash = round((float) $payment['cash_amount'] - $cashRefund, 2);
+            $newCard = round((float) $payment['card_amount'] - $cardRefund, 2);
+            $newPaymentTotal = round((float) $payment['total_amount'] - $netRefundAmount, 2);
+            if ($newCash < -0.01 || $newCard < -0.01 || $newPaymentTotal < -0.01) {
+                throw new \RuntimeException('Refund exceeds payment amounts');
+            }
+            $newCash = max(0, $newCash);
+            $newCard = max(0, $newCard);
+            $newPaymentTotal = max(0, $newPaymentTotal);
+
+            $this->pdo->prepare(
+                'UPDATE payments SET cash_amount = ?, card_amount = ?, total_amount = ? WHERE session_id = ?'
+            )->execute([$newCash, $newCard, $newPaymentTotal, $id]);
+
+            $this->pdo->prepare(
+                'UPDATE sessions SET products_total = ?, total_amount = ?, discount = ?, order_state = \'adjusted\', updated_at = NOW() WHERE id = ?'
+            )->execute([$newProductsTotal, $newTotal, $newDiscount, $id]);
+
+            if ($cashRefund > 0 && !$inCurrentShiftWindow && $openShift !== null) {
+                $hasReturn = false;
+                foreach ($operations as $op) {
+                    if ($op['mode'] === 'return') {
+                        $hasReturn = true;
+                        break;
+                    }
+                }
+                $category = $hasReturn ? 'sale_refund' : 'sale_adjust';
+                $description = $hasReturn
+                    ? 'Satış qaytarması #' . $id
+                    : 'Sifarişdən məhsul silindi #' . $id;
+                $this->pdo->prepare(
+                    'INSERT INTO cash_movements (business_id, shift_id, type, category, amount, description, source, created_by, created_at)
+                     VALUES (?, ?, \'refund\', ?, ?, ?, \'admin\', ?, NOW())'
+                )->execute([
+                    $businessId,
+                    (int) $openShift['id'],
+                    $category,
+                    $cashRefund,
+                    $description,
+                    (int) $user['id'],
+                ]);
+                $shiftMovementId = (int) $this->pdo->lastInsertId();
+            }
+
+            $this->pdo->commit();
+        } catch (\Throwable $e) {
+            $this->pdo->rollBack();
+            return ApiResponse::error($e->getMessage(), 400);
+        }
+
+        $detail = $this->fetchOrderDetail($id);
+        $detail['items_remove_summary'] = [
+            'gross_removed_amount' => $totalRemovedGross,
+            'removed_amount' => $netRefundAmount,
+            'cash_refunded' => $cashRefund,
+            'card_refunded' => $cardRefund,
+            'new_products_total' => $newProductsTotal,
+            'new_total' => $newTotal,
+            'shift_movement_id' => $shiftMovementId,
+            'applied_to_current_shift' => $cashRefund > 0 && !$inCurrentShiftWindow && $shiftMovementId !== null,
+        ];
+
+        return ApiResponse::success($detail);
     }
 
     private function fetchOrder(int $id): ?array

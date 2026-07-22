@@ -13,6 +13,7 @@ class SessionCartList extends StatelessWidget {
     required this.onIncrease,
     required this.onDecrease,
     required this.onRemove,
+    this.itemDiscounts = const {},
     this.compact = false,
   });
 
@@ -21,6 +22,8 @@ class SessionCartList extends StatelessWidget {
   final void Function(Map<String, dynamic> item) onIncrease;
   final void Function(Map<String, dynamic> item) onDecrease;
   final void Function(Map<String, dynamic> item) onRemove;
+  /// session_item id → endirim məbləği
+  final Map<int, double> itemDiscounts;
   final bool compact;
 
   @override
@@ -30,19 +33,26 @@ class SessionCartList extends StatelessWidget {
 
     if (items.isEmpty) {
       return Container(
-        padding: EdgeInsets.all(compact ? AppSpacing.lg : AppSpacing.xxl),
+        padding: EdgeInsets.all(compact ? AppSpacing.md : AppSpacing.xxl),
         decoration: BoxDecoration(
           color: p.surface,
           borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
           border: Border.all(color: p.border),
         ),
+        alignment: Alignment.center,
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.shopping_cart_outlined, size: 40, color: p.textMuted),
-            const SizedBox(height: AppSpacing.md),
-            Text('Səbət boşdur', style: TextStyle(color: p.textMuted, fontWeight: FontWeight.w500)),
-            const SizedBox(height: AppSpacing.xs),
-            Text('Soldan məhsul seçin', style: TextStyle(color: p.textMuted, fontSize: 12)),
+            Icon(Icons.shopping_cart_outlined, size: compact ? 28 : 40, color: p.textMuted),
+            SizedBox(height: compact ? AppSpacing.sm : AppSpacing.md),
+            Text(
+              'Səbət boşdur',
+              style: TextStyle(color: p.textMuted, fontWeight: FontWeight.w500, fontSize: compact ? 13 : 14),
+            ),
+            if (!compact) ...[
+              const SizedBox(height: AppSpacing.xs),
+              Text('Soldan məhsul seçin', style: TextStyle(color: p.textMuted, fontSize: 12)),
+            ],
           ],
         ),
       );
@@ -57,6 +67,7 @@ class SessionCartList extends StatelessWidget {
           final isSetItem = item['is_set_item'] == true || item['is_set_item'] == 1;
           final unitPrice = jsonToDouble(item['unit_price']);
           final lineTotal = unitPrice * qty;
+          final lineDiscount = itemDiscounts[jsonToInt(item['id'])] ?? 0.0;
           return Container(
             margin: const EdgeInsets.only(bottom: AppSpacing.sm),
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.sm),
@@ -88,6 +99,11 @@ class SessionCartList extends StatelessWidget {
                         isSetItem ? 'Paket daxilində' : '${unitPrice.toStringAsFixed(2)} ₼',
                         style: TextStyle(fontSize: 11, color: p.textMuted),
                       ),
+                      if (lineDiscount > 0)
+                        Text(
+                          'Endirim: -${lineDiscount.toStringAsFixed(2)} ₼',
+                          style: TextStyle(fontSize: 11, color: accent, fontWeight: FontWeight.w500),
+                        ),
                     ],
                   ),
                 ),

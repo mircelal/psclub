@@ -49,6 +49,7 @@ List<Map<String, dynamic>> promotionsForTariff(
   final key = tariffName.trim().toLowerCase();
   for (final p in promotions) {
     final scope = p['scope'] as String? ?? 'all_tables';
+    if (scope == 'products') continue;
     if (scope == 'all_tables') {
       out.add(p);
       continue;

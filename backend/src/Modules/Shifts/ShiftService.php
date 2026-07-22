@@ -27,9 +27,11 @@ final class ShiftService
     public function getOpenShift(int $businessId): ?array
     {
         $stmt = $this->pdo->prepare(
-            'SELECT s.*, u.full_name AS opened_by_name, u.username AS opened_by_username
+            'SELECT s.*,
+                    COALESCE(u.full_name, u.username, \'Silinmiş istifadəçi\') AS opened_by_name,
+                    u.username AS opened_by_username
              FROM shifts s
-             JOIN users u ON u.id = s.opened_by
+             LEFT JOIN users u ON u.id = s.opened_by
              WHERE s.business_id = ? AND s.status = \'open\'
              ORDER BY s.opened_at DESC LIMIT 1'
         );
@@ -41,10 +43,12 @@ final class ShiftService
     public function findShift(int $id, int $businessId): ?array
     {
         $stmt = $this->pdo->prepare(
-            'SELECT s.*, ou.full_name AS opened_by_name, ou.username AS opened_by_username,
-                    cu.full_name AS closed_by_name
+            'SELECT s.*,
+                    COALESCE(ou.full_name, ou.username, \'Silinmiş istifadəçi\') AS opened_by_name,
+                    ou.username AS opened_by_username,
+                    COALESCE(cu.full_name, cu.username) AS closed_by_name
              FROM shifts s
-             JOIN users ou ON ou.id = s.opened_by
+             LEFT JOIN users ou ON ou.id = s.opened_by
              LEFT JOIN users cu ON cu.id = s.closed_by
              WHERE s.id = ? AND s.business_id = ?'
         );

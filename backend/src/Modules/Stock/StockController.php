@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Modules\Stock;
 
 use App\Support\ApiResponse;
+use App\Support\SchemaMigrator;
+use App\Support\StockMovementLabels;
 use PDO;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -18,14 +20,30 @@ final class StockController
 
     public function movements(Request $request, Response $response): Response
     {
-        $stmt = $this->pdo->query(
-            'SELECT sm.*, p.name AS product_name, u.username AS created_by_name
+        $params = $request->getQueryParams();
+        $productId = isset($params['product_id']) ? (int) $params['product_id'] : null;
+        $limit = min(500, max(1, (int) ($params['limit'] ?? 200)));
+
+        $sql = 'SELECT sm.*, p.name AS product_name,
+                       COALESCE(NULLIF(u.full_name, \'\'), u.username) AS created_by_name
              FROM stock_movements sm
              JOIN products p ON p.id = sm.product_id
-             LEFT JOIN users u ON u.id = sm.created_by
-             ORDER BY sm.created_at DESC LIMIT 100'
-        );
-        return ApiResponse::success($stmt->fetchAll());
+             LEFT JOIN users u ON u.id = sm.created_by';
+        $bindings = [];
+
+        if ($productId !== null && $productId > 0) {
+            $sql .= ' WHERE sm.product_id = ?';
+            $bindings[] = $productId;
+        }
+
+        $sql .= ' ORDER BY sm.created_at DESC, sm.id DESC LIMIT ' . $limit;
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($bindings);
+
+        $rows = array_map(fn (array $row): array => $this->formatMovementRow($row), $stmt->fetchAll());
+
+        return ApiResponse::success($rows);
     }
 
     public function storeMovement(Request $request, Response $response): Response
@@ -39,16 +57,28 @@ final class StockController
             return ApiResponse::error('Validation failed', 422);
         }
 
+        $type = (string) $body['type'];
+        $qty = (int) $body['quantity'];
+        $actor = StockMovementLabels::actorLabel($user['full_name'] ?? null, $user['username'] ?? null);
+        $customNote = trim((string) ($body['note'] ?? ''));
+        $note = $customNote !== '' ? $customNote : match ($type) {
+            'in' => $actor . ': anbara +' . $qty,
+            'out' => $actor . ': anbardan −' . $qty,
+            'adjustment' => $actor . ': stok düzəlişi → ' . $qty,
+            default => $actor . ': stok əməliyyatı',
+        };
+
         $this->pdo->beginTransaction();
         try {
             $this->applyStockChange(
                 (int) $body['product_id'],
-                $body['type'],
-                (int) $body['quantity'],
-                $body['type'],
+                $type,
+                $qty,
+                $type,
+                'manual',
                 null,
                 (int) $user['id'],
-                $body['note'] ?? null
+                $note
             );
             $this->pdo->commit();
         } catch (\Throwable $e) {
@@ -85,6 +115,10 @@ final class StockController
         ?int $userId,
         ?string $note = null
     ): void {
+        if ($quantity < 0) {
+            throw new \RuntimeException('Invalid quantity');
+        }
+
         $stmt = $this->pdo->prepare('SELECT quantity FROM product_stock WHERE product_id = ? FOR UPDATE');
         $stmt->execute([$productId]);
         $row = $stmt->fetch();
@@ -116,9 +150,79 @@ final class StockController
             default => 'in',
         };
 
-        $this->pdo->prepare(
-            'INSERT INTO stock_movements (business_id, product_id, type, quantity, reference_type, reference_id, note, created_by, created_at)
-             VALUES (1, ?, ?, ?, ?, ?, ?, ?, NOW())'
-        )->execute([$productId, $stockType, abs($quantity), $refType, $refId, $note, $userId]);
+        $storedQty = $type === 'adjustment' ? $newQty : $quantity;
+        $createdBy = ($userId !== null && $userId > 0) ? $userId : null;
+
+        if (SchemaMigrator::columnExists($this->pdo, 'stock_movements', 'delta')) {
+            $this->pdo->prepare(
+                'INSERT INTO stock_movements
+                 (business_id, product_id, type, quantity, delta, balance_before, balance_after,
+                  reference_type, reference_id, note, created_by, created_at)
+                 VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
+            )->execute([
+                $productId,
+                $stockType,
+                abs($storedQty),
+                $delta,
+                $current,
+                $newQty,
+                $refType,
+                $refId,
+                $note,
+                $createdBy,
+            ]);
+        } else {
+            $this->pdo->prepare(
+                'INSERT INTO stock_movements (business_id, product_id, type, quantity, reference_type, reference_id, note, created_by, created_at)
+                 VALUES (1, ?, ?, ?, ?, ?, ?, ?, NOW())'
+            )->execute([
+                $productId,
+                $stockType,
+                abs($storedQty),
+                $refType,
+                $refId,
+                $note,
+                $createdBy,
+            ]);
+        }
+    }
+
+    /** @param array<string, mixed> $row */
+    public function formatMovementRow(array $row): array
+    {
+        $type = (string) $row['type'];
+        $qty = (int) $row['quantity'];
+
+        $delta = array_key_exists('delta', $row) && $row['delta'] !== null
+            ? (int) $row['delta']
+            : match ($type) {
+                'in' => $qty,
+                'out', 'sale' => -$qty,
+                'adjustment' => 0,
+                default => 0,
+            };
+
+        $balanceAfter = array_key_exists('balance_after', $row) && $row['balance_after'] !== null
+            ? (int) $row['balance_after']
+            : null;
+
+        return [
+            'id' => (int) $row['id'],
+            'product_id' => (int) $row['product_id'],
+            'product_name' => $row['product_name'] ?? null,
+            'type' => $type,
+            'reference_type' => $row['reference_type'],
+            'reference_id' => $row['reference_id'] !== null ? (int) $row['reference_id'] : null,
+            'quantity' => $qty,
+            'delta' => $delta,
+            'balance_before' => array_key_exists('balance_before', $row) && $row['balance_before'] !== null
+                ? (int) $row['balance_before']
+                : null,
+            'balance_after' => $balanceAfter,
+            'label_az' => StockMovementLabels::labelAz($type, $row['reference_type'], $row['reference_id']),
+            'created_at' => $row['created_at'],
+            'created_by_name' => $row['created_by_name'] ?? null,
+            'note' => $row['note'],
+        ];
     }
 }

@@ -177,6 +177,55 @@ class AppTheme {
         textColor: onSurface,
       ),
       dividerTheme: DividerThemeData(color: scheme.outline.withValues(alpha: 0.65)),
+      segmentedButtonTheme: SegmentedButtonThemeData(
+        style: ButtonStyle(
+          visualDensity: VisualDensity.compact,
+          padding: const WidgetStatePropertyAll(
+            EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.sm),
+          ),
+          side: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.selected)) {
+              return BorderSide(color: BrandColors.brightBlue.withValues(alpha: isLight ? 0.9 : 1));
+            }
+            return BorderSide(color: scheme.outline);
+          }),
+          backgroundColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.selected)) {
+              return BrandColors.brightBlue;
+            }
+            return isLight ? CashierTheme.lightSurfaceSecondary : DarkNeutral.surface2;
+          }),
+          foregroundColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.selected)) {
+              return Colors.white;
+            }
+            return onSurface;
+          }),
+          textStyle: WidgetStatePropertyAll(
+            CashierTypography.ui(size: 13, weight: FontWeight.w600),
+          ),
+          iconColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.selected)) {
+              return Colors.white;
+            }
+            return isLight ? BrandColors.navy : onSurfaceVariant;
+          }),
+        ),
+      ),
+      switchTheme: SwitchThemeData(
+        thumbColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
+            return Colors.white;
+          }
+          return isLight ? CashierTheme.lightBorderStrong : DarkNeutral.borderStrong;
+        }),
+        trackColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
+            return BrandColors.brightBlue.withValues(alpha: isLight ? 0.85 : 1);
+          }
+          return isLight ? CashierTheme.lightBorder : DarkNeutral.surface3;
+        }),
+      ),
     );
   }
 

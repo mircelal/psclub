@@ -132,8 +132,25 @@ final class UsersController
             }
         }
 
-        $this->pdo->prepare('UPDATE users SET is_active = 0, updated_at = NOW() WHERE id = ?')->execute([$id]);
-        return ApiResponse::success(['deleted' => true]);
+        $openShift = $this->pdo->prepare(
+            "SELECT id FROM shifts WHERE opened_by = ? AND status = 'open' LIMIT 1"
+        );
+        $openShift->execute([$id]);
+        if ($openShift->fetch()) {
+            return ApiResponse::error('Açıq növbəsi olan istifadəçi silinə bilməz — əvvəlcə növbəni bağlayın', 409);
+        }
+
+        $activeSession = $this->pdo->prepare(
+            "SELECT id FROM sessions WHERE opened_by = ? AND status IN ('active', 'paused') LIMIT 1"
+        );
+        $activeSession->execute([$id]);
+        if ($activeSession->fetch()) {
+            return ApiResponse::error('Aktiv sessiyası olan istifadəçi silinə bilməz', 409);
+        }
+
+        $this->pdo->prepare('DELETE FROM users WHERE id = ?')->execute([$id]);
+
+        return ApiResponse::success(['deleted' => true, 'id' => $id]);
     }
 
     private function countActiveAdmins(): int

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../../core/theme/brand_colors.dart';
+import '../../../core/api/api_client.dart';
+import '../../../core/theme/admin_theme.dart';
 import '../../../core/theme/app_spacing.dart';
+import '../../../core/theme/cashier_theme.dart';
 import '../../../core/utils/json_parse.dart';
 import '../../../core/widgets/app_dialog.dart';
 import '../../../core/widgets/app_snackbar.dart';
@@ -48,7 +50,7 @@ class CustomerGroupsPanelState extends ConsumerState<CustomerGroupsPanel> {
     );
     var discountType = group?['discount_type'] as String? ?? 'percent';
     var appliesTo = group?['applies_to'] as String? ?? 'time_only';
-    var isActive = group?['is_active'] != false;
+    var isActive = jsonIsActive(group?['is_active']);
 
     final ok = await showAppDialog<bool>(
       context: context,
@@ -158,6 +160,46 @@ class CustomerGroupsPanelState extends ConsumerState<CustomerGroupsPanel> {
     return type == 'percent' ? '${value.toStringAsFixed(0)}%$applies' : '${value.toStringAsFixed(2)} ₼$applies';
   }
 
+  Future<void> _deleteGroup(Map<String, dynamic> group) async {
+    final name = group['name'] as String? ?? 'Qrup';
+    final confirm = await showAppDialog<bool>(
+      context: context,
+      title: 'Qrupu sil',
+      subtitle: 'Qrup tam silinəcək',
+      icon: Icons.delete_outline,
+      body: Text('“$name” silinsin?', style: Theme.of(context).textTheme.bodyMedium),
+      actions: [
+        OutlinedButton(onPressed: () => Navigator.pop(context, false), child: const Text('Xeyr')),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, true),
+          style: FilledButton.styleFrom(backgroundColor: AdminTheme.danger(context)),
+          child: const Text('Sil'),
+        ),
+      ],
+    );
+    if (confirm != true) return;
+
+    try {
+      await ref.read(posServiceProvider).deleteCustomerGroup(jsonToInt(group['id']));
+      await reload();
+      if (mounted) showAppSnackBar(context, 'Qrup silindi');
+    } catch (e) {
+      if (mounted) showAppSnackBar(context, ApiClient.messageFromError(e), isError: true);
+    }
+  }
+
+  Future<void> _toggleActive(Map<String, dynamic> group) async {
+    final currentlyActive = jsonIsActive(group['is_active']);
+    try {
+      await ref.read(posServiceProvider).updateCustomerGroup(jsonToInt(group['id']), {
+        'is_active': !currentlyActive,
+      });
+      await reload();
+    } catch (e) {
+      if (mounted) showAppSnackBar(context, ApiClient.messageFromError(e), isError: true);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -177,42 +219,42 @@ class CustomerGroupsPanelState extends ConsumerState<CustomerGroupsPanel> {
       separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.sm),
       itemBuilder: (_, i) {
         final g = _groups[i] as Map<String, dynamic>;
-        final active = g['is_active'] != false;
+        final active = jsonIsActive(g['is_active']);
         final members = jsonToInt(g['member_count']);
         return AdminListTile(
           leading: CircleAvatar(
-            backgroundColor: BrandColors.brightBlue.withValues(alpha: 0.12),
-            child: Icon(Icons.groups_outlined, color: BrandColors.brightBlue, size: 20),
+            backgroundColor: active
+                ? CashierTheme.accentSubtle(context)
+                : CashierTheme.surfaceSecondary(context),
+            child: Icon(
+              Icons.groups_outlined,
+              color: active ? CashierTheme.accent(context) : CashierTheme.textTertiary(context),
+              size: 20,
+            ),
           ),
           title: g['name'] as String? ?? '',
           subtitle: [
             _discountLabel(g),
             if ((g['description'] as String?)?.isNotEmpty == true) g['description'] as String,
             if (members > 0) '$members müştəri',
+            if (!active) 'Deaktiv',
           ].where((e) => e.isNotEmpty).join(' · '),
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (!active)
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: Text(
-                    'Deaktiv',
-                    style: TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 12),
-                  ),
-                ),
+              Switch(
+                value: active,
+                onChanged: (_) => _toggleActive(g),
+              ),
               IconButton(
-                icon: const Icon(Icons.edit_outlined, size: 20),
+                icon: Icon(Icons.edit_outlined, size: 20, color: CashierTheme.textSecondary(context)),
+                tooltip: 'Redaktə et',
                 onPressed: () => _showForm(group: g),
               ),
             ],
           ),
           onTap: () => _showForm(group: g),
-          onDelete: () async {
-            await ref.read(posServiceProvider).deleteCustomerGroup(jsonToInt(g['id']));
-            await reload();
-            if (mounted) showAppSnackBar(context, 'Qrup silindi');
-          },
+          onDelete: () => _deleteGroup(g),
         );
       },
     );

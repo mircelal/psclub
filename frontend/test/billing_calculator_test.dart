@@ -43,13 +43,55 @@ void main() {
     );
   });
 
-  test('per_minute unchanged', () {
+  test('per_minute unchanged for open-ended sessions', () {
     expect(
       BillingCalculator.billableMinutes(
         activeSeconds: 69 * 60,
         billingMode: 'per_minute',
       ),
       69,
+    );
+  });
+
+  test('per_minute caps charge at planned duration for timed sessions', () {
+    final charge = BillingCalculator.calculateTimeCharge(
+      activeSeconds: 180 * 60,
+      hourlyRate: 10.0,
+      billingMode: 'per_minute',
+      plannedMinutes: 60,
+    );
+    expect(charge, closeTo(10.0, 0.01));
+  });
+
+  test('open-ended session keeps min 1h + grace rule', () {
+    final charge = BillingCalculator.calculateTimeCharge(
+      activeSeconds: 70 * 60,
+      hourlyRate: 10.0,
+      billingMode: 'min_1h_then_30',
+      minBillingMinutes: minM,
+      billingIncrementMinutes: stepM,
+      billingGraceMinutes: grace,
+      plannedMinutes: null,
+    );
+    expect(charge, closeTo(10.0, 0.01));
+  });
+
+  test('capActiveSecondsForPlanned limits elapsed time', () {
+    expect(
+      BillingCalculator.capActiveSecondsForPlanned(180 * 60, 60),
+      60 * 60,
+    );
+    expect(
+      BillingCalculator.capActiveSecondsForPlanned(45 * 60, 60),
+      45 * 60,
+    );
+    expect(
+      BillingCalculator.capActiveSecondsForPlanned(180 * 60, null),
+      180 * 60,
+    );
+    expect(
+      BillingCalculator.capActiveSecondsForPlanned(180 * 60, 120),
+      120 * 60,
     );
   });
 

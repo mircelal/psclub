@@ -96,6 +96,7 @@ class AppTextField extends StatelessWidget {
     this.obscureText = false,
     this.keyboardType,
     this.onSubmitted,
+    this.onChanged,
     this.autofocus = false,
     this.readOnly = false,
   });
@@ -107,6 +108,7 @@ class AppTextField extends StatelessWidget {
   final bool obscureText;
   final TextInputType? keyboardType;
   final ValueChanged<String>? onSubmitted;
+  final ValueChanged<String>? onChanged;
   final bool autofocus;
   final bool readOnly;
 
@@ -120,6 +122,7 @@ class AppTextField extends StatelessWidget {
       autofocus: autofocus,
       readOnly: readOnly,
       onSubmitted: onSubmitted,
+      onChanged: onChanged,
       style: TextStyle(fontSize: 15, color: scheme.onSurface),
       decoration: InputDecoration(
         labelText: label,

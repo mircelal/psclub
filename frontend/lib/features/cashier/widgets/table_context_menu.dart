@@ -7,6 +7,10 @@ import '../../../core/widgets/app_snackbar.dart';
 import '../../../services/pos_service.dart';
 import '../close_session_dialog.dart';
 import '../shift_guard.dart';
+import '../tables_provider.dart';
+import 'session_transfer_dialog.dart';
+import '../../../core/config/business_config_provider.dart';
+import 'session_extend_dialog.dart';
 import 'table_session_state.dart';
 
 /// Masa kartında sağ klik — yalnız cari vəziyyətə uyğun əməliyyatlar.
@@ -22,6 +26,10 @@ Future<void> showTableContextMenu({
   final name = table['name'] as String? ?? 'Masa';
   final sessionId = TableSessionState.openSessionId(table);
   final isPaused = TableSessionState.isPaused(table);
+  final config = ref.read(businessConfigProvider).valueOrNull ?? BusinessConfig.fallback;
+  final canExtend = sessionId != null && sessionCanExtendTime(table, config);
+  final allTables = ref.read(tablesProvider).valueOrNull?.cast<Map<String, dynamic>>() ?? [];
+  final canTransfer = TableSessionState.canTransferSession(table, allTables);
 
   final items = <PopupMenuEntry<String>>[
     PopupMenuItem<String>(
@@ -58,6 +66,30 @@ Future<void> showTableContextMenu({
         ),
       ),
     );
+    if (canExtend) {
+      items.add(
+        PopupMenuItem(
+          value: 'extend',
+          child: _MenuRow(
+            icon: Icons.more_time,
+            label: 'Vaxt əlavə et',
+            color: CashierTheme.textPrimary(context),
+          ),
+        ),
+      );
+    }
+    if (canTransfer) {
+      items.add(
+        PopupMenuItem(
+          value: 'transfer',
+          child: _MenuRow(
+            icon: Icons.swap_horiz,
+            label: 'Başqa masaya köçür',
+            color: CashierTheme.textPrimary(context),
+          ),
+        ),
+      );
+    }
     items.add(const PopupMenuDivider(height: 8));
     items.add(
       PopupMenuItem(
@@ -114,6 +146,32 @@ Future<void> showTableContextMenu({
           AppFeedback.pause();
         }
         onChanged();
+      } catch (e) {
+        if (context.mounted) showAppSnackBar(context, e.toString(), isError: true);
+      }
+    case 'extend':
+      final extended = await showSessionExtendTimeDialog(
+        context: context,
+        ref: ref,
+        sessionId: sessionId!,
+        session: table,
+      );
+      if (extended) onChanged();
+    case 'transfer':
+      try {
+        final session = await ref.read(posServiceProvider).getSession(sessionId!);
+        if (!context.mounted) return;
+        final transferred = await showSessionTransferDialog(
+          context: context,
+          ref: ref,
+          sessionId: sessionId,
+          session: session,
+          allTables: allTables,
+        );
+        if (transferred) {
+          AppFeedback.success();
+          onChanged();
+        }
       } catch (e) {
         if (context.mounted) showAppSnackBar(context, e.toString(), isError: true);
       }

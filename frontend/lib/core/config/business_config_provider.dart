@@ -108,6 +108,26 @@ class BusinessConfig {
 
 
 
+  /// Kassir uzatması: 30, 60, 90, 120 dəq (addım əsasında).
+
+  List<int> get extendTimeOptions {
+
+    final step = extendStepMinutes;
+
+    return [step, step * 2, step * 3, step * 4];
+
+  }
+
+
+
+  List<int> extendOptionsForPlanned(int currentPlanned) {
+
+    return extendTimeOptions.where((m) => currentPlanned + m <= maxTimedOpenMinutes).toList();
+
+  }
+
+
+
   static const maxTimedOpenMinutes = 180;
 
 

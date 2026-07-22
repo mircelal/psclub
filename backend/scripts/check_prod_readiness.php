@@ -15,11 +15,11 @@ foreach ($pdo->query('SHOW TABLES') as $row) {
     $tables[] = (array_values($row)[0]);
 }
 
-$required = ['promotions', 'customer_groups', 'table_tariffs', 'shifts', 'sessions', 'customers'];
+$required = ['promotions', 'customer_groups', 'table_tariffs', 'shifts', 'sessions', 'customers', 'loyalty_tiers', 'loyalty_ledger'];
 $missing = array_values(array_diff($required, $tables));
 
 $migrations = $pdo->query(
-    'SELECT version FROM phinxlog WHERE version IN (20260601120000, 20260601130000) ORDER BY version'
+    'SELECT version FROM phinxlog WHERE version IN (20260601120000, 20260601130000, 20260620120000) ORDER BY version'
 )->fetchAll(PDO::FETCH_COLUMN);
 
 $diag = App\Support\SchemaMigrator::diagnostics($pdo);
@@ -35,6 +35,13 @@ if (in_array('promotions', $tables, true)) {
 }
 if (in_array('customer_groups', $tables, true)) {
     echo 'active_customer_groups: ' . $pdo->query('SELECT COUNT(*) FROM customer_groups WHERE is_active=1')->fetchColumn() . "\n";
+}
+if (in_array('loyalty_tiers', $tables, true)) {
+    echo 'active_loyalty_tiers: ' . $pdo->query('SELECT COUNT(*) FROM loyalty_tiers WHERE is_active=1')->fetchColumn() . "\n";
+}
+if (in_array('customers', $tables, true)) {
+    $col = $pdo->query("SHOW COLUMNS FROM customers LIKE 'bonus_minutes'")->fetch();
+    echo 'loyalty_customer_columns: ' . ($col ? 'YES' : 'NO') . "\n";
 }
 
 $openShift = $pdo->query("SELECT COUNT(*) FROM shifts WHERE status='open'")->fetchColumn();

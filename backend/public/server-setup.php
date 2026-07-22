@@ -75,7 +75,8 @@ try {
         $ok = ($checks['billing_columns_ok'] ?? false)
             && ($checks['public_config_query_ok'] ?? false)
             && ($checks['tables_query_ok'] ?? false)
-            && ($checks['discounts_schema_ok'] ?? false);
+            && ($checks['discounts_schema_ok'] ?? false)
+            && ($checks['loyalty_schema_ok'] ?? false);
 
         http_response_code($ok ? 200 : 503);
         echo json_encode([

@@ -72,4 +72,55 @@ if (abs($charge90planned - 15.0) > 0.001) {
 }
 echo "OK planned 90 ignores elapsed grace\n";
 
+$cap180 = $calc->capActiveSecondsForPlanned(180 * 60, 60);
+assertEq(3600, $cap180, 'cap 180min to 60min planned');
+
+$chargePerMinuteTimed = $calc->calculateTimeCharge(
+    180 * 60,
+    10.0,
+    'per_minute',
+    0.01,
+    $min,
+    $step,
+    $grace,
+    60
+);
+if (abs($chargePerMinuteTimed - 10.0) > 0.001) {
+    fwrite(STDERR, "FAIL per_minute timed cap: expected 10.0, got {$chargePerMinuteTimed}\n");
+    exit(1);
+}
+echo "OK per_minute timed 180min elapsed charges 60min only\n";
+
+$chargeOpen70 = $calc->calculateTimeCharge(
+    70 * 60,
+    10.0,
+    'min_1h_then_30',
+    0.01,
+    $min,
+    $step,
+    $grace,
+    null
+);
+if (abs($chargeOpen70 - 10.0) > 0.001) {
+    fwrite(STDERR, "FAIL open 70min grace: expected 10.0, got {$chargeOpen70}\n");
+    exit(1);
+}
+echo "OK open-ended 70min with grace = 1 hour rate\n";
+
+$chargeExtended = $calc->calculateTimeCharge(
+    180 * 60,
+    10.0,
+    'per_minute',
+    0.01,
+    $min,
+    $step,
+    $grace,
+    120
+);
+if (abs($chargeExtended - 20.0) > 0.001) {
+    fwrite(STDERR, "FAIL extended 120min planned: expected 20.0, got {$chargeExtended}\n");
+    exit(1);
+}
+echo "OK extended 120min planned charges 120min only\n";
+
 echo "All billing tests passed.\n";

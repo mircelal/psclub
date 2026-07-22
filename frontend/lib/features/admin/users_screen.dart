@@ -188,10 +188,10 @@ class _UsersScreenState extends ConsumerState<UsersScreen> {
     final ok = await showAppDialog<bool>(
       context: context,
       title: 'İstifadəçini sil',
-      subtitle: '“$username” deaktiv edilsin?',
-      icon: Icons.person_off_outlined,
+      subtitle: '“$username” tam silinəcək',
+      icon: Icons.delete_outline,
       body: Text(
-        'Hesab silinmir — yalnız deaktiv olunur və giriş edə bilməz. Sonradan redaktə ilə yenidən aktiv edə bilərsiniz.',
+        'Hesab silindikdən sonra giriş edə bilməz. Növbə və satış tarixçəsində adı qala bilər.',
         style: Theme.of(context).textTheme.bodyMedium,
       ),
       actions: [
@@ -199,7 +199,7 @@ class _UsersScreenState extends ConsumerState<UsersScreen> {
         FilledButton(
           onPressed: () => Navigator.pop(context, true),
           style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
-          child: const Text('Deaktiv et'),
+          child: const Text('Sil'),
         ),
       ],
     );
@@ -208,7 +208,7 @@ class _UsersScreenState extends ConsumerState<UsersScreen> {
     try {
       await ref.read(posServiceProvider).deleteUser(id);
       if (mounted) {
-        showAppSnackBar(context, 'İstifadəçi deaktiv edildi');
+        showAppSnackBar(context, 'İstifadəçi silindi');
         _load();
       }
     } catch (e) {
@@ -220,7 +220,7 @@ class _UsersScreenState extends ConsumerState<UsersScreen> {
   Widget build(BuildContext context) {
     return AdminPageLayout(
       title: 'İstifadəçilər',
-      subtitle: 'Komanda və giriş icazələri — redaktə və deaktiv etmə',
+      subtitle: 'Komanda və giriş icazələri — redaktə və silmə',
       action: FilledButton.icon(
         onPressed: _add,
         icon: const Icon(Icons.person_add, size: 20),

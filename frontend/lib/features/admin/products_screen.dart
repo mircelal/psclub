@@ -16,6 +16,8 @@ import '../../core/widgets/app_snackbar.dart';
 import '../../core/widgets/empty_state.dart';
 import '../../core/widgets/product_image.dart';
 import '../../services/pos_service.dart';
+import 'product_delete_action.dart';
+import 'product_profile_screen.dart';
 import 'widgets/admin_page_layout.dart';
 
 class ProductsScreen extends ConsumerStatefulWidget {
@@ -200,6 +202,30 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> with SingleTick
     await _productForm(product: product);
   }
 
+  Future<void> _deleteProduct(Map<String, dynamic> product) async {
+    final deleted = await confirmAndDeleteProduct(
+      ref,
+      context,
+      id: jsonToInt(product['id']),
+      name: product['name'] as String? ?? 'Məhsul',
+    );
+    if (deleted && mounted) _load();
+  }
+
+  void _openProductProfile(Map<String, dynamic> product) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ProductProfileScreen(
+          productId: jsonToInt(product['id']),
+          initialName: product['name'] as String?,
+        ),
+      ),
+    ).then((deleted) {
+      if (deleted == true && mounted) _load();
+    });
+  }
+
   Future<void> _productForm({Map<String, dynamic>? product}) async {
     final isEdit = product != null;
     final id = isEdit ? jsonToInt(product['id']) : 0;
@@ -282,44 +308,38 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> with SingleTick
           );
         },
       ),
-      actions: [
-        if (isEdit)
-          Expanded(
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton(
-                onPressed: () async {
-                  final confirm = await showAppDialog<bool>(
-                    context: context,
-                    title: 'Məhsulu sil',
-                    subtitle: 'Kataloqdan gizlədiləcək',
-                    icon: Icons.delete_outline,
-                    body: Text('“${product['name']}” silinsin?', style: Theme.of(context).textTheme.bodyMedium),
-                    actions: [
-                      OutlinedButton(onPressed: () => Navigator.pop(context, false), child: const Text('Xeyr')),
-                      FilledButton(
-                        onPressed: () => Navigator.pop(context, true),
-                        style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
-                        child: const Text('Sil'),
-                      ),
-                    ],
-                  );
-                  if (confirm == true && context.mounted) {
-                    Navigator.pop(context, false);
-                    await ref.read(posServiceProvider).deleteProduct(id);
-                    if (mounted) {
-                      showAppSnackBar(context, 'Məhsul silindi');
-                      _load();
-                    }
-                  }
-                },
-                child: Text('Sil', style: TextStyle(color: AppColors.danger)),
+      actions: isEdit
+          ? [
+              SizedBox(
+                width: double.infinity,
+                child: Row(
+                  children: [
+                    TextButton(
+                      onPressed: () async {
+                        final deleted = await confirmAndDeleteProduct(
+                          ref,
+                          context,
+                          id: id,
+                          name: product['name']?.toString() ?? 'Məhsul',
+                        );
+                        if (!mounted || !deleted) return;
+                        Navigator.pop(context, false);
+                        _load();
+                      },
+                      child: Text('Sil', style: TextStyle(color: AppColors.danger)),
+                    ),
+                    const Spacer(),
+                    OutlinedButton(onPressed: () => Navigator.pop(context, false), child: const Text('Ləğv')),
+                    const SizedBox(width: AppSpacing.md),
+                    FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Saxla')),
+                  ],
+                ),
               ),
-            ),
-          ),
-        OutlinedButton(onPressed: () => Navigator.pop(context, false), child: const Text('Ləğv')),
-        FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(isEdit ? 'Saxla' : 'Yarat')),
-      ],
+            ]
+          : [
+              OutlinedButton(onPressed: () => Navigator.pop(context, false), child: const Text('Ləğv')),
+              FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Yarat')),
+            ],
     );
 
     if (ok != true) return;
@@ -399,7 +419,9 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> with SingleTick
                             _filterUncategorized = uncategorized;
                           });
                         },
+                        onOpenProfile: _openProductProfile,
                         onEdit: _editProduct,
+                        onDelete: _deleteProduct,
                         onRefresh: _load,
                         palette: p,
                       ),
@@ -427,7 +449,9 @@ class _ProductsTab extends StatelessWidget {
     required this.filterCategoryId,
     required this.filterUncategorized,
     required this.onFilter,
+    required this.onOpenProfile,
     required this.onEdit,
+    required this.onDelete,
     required this.onRefresh,
     required this.palette,
   });
@@ -438,7 +462,9 @@ class _ProductsTab extends StatelessWidget {
   final int? filterCategoryId;
   final bool filterUncategorized;
   final void Function(int? categoryId, bool uncategorized) onFilter;
+  final void Function(Map<String, dynamic>) onOpenProfile;
   final void Function(Map<String, dynamic>) onEdit;
+  final void Function(Map<String, dynamic>) onDelete;
   final VoidCallback onRefresh;
   final AppPalette palette;
 
@@ -511,7 +537,7 @@ class _ProductsTab extends StatelessWidget {
                     final catName = product['category_name'] as String?;
 
                     return AdminListTile(
-                      onTap: () => onEdit(product),
+                      onTap: () => onOpenProfile(product),
                       leading: ProductImage(
                         imageUrl: product['image_url'] as String?,
                         categoryName: catName,
@@ -524,7 +550,22 @@ class _ProductsTab extends StatelessWidget {
                         'Stok: $stock',
                         if (catName != null && catName.isNotEmpty) catName,
                       ].join(' • '),
-                      trailing: Icon(Icons.chevron_right, color: palette.textMuted, size: 22),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: Icon(Icons.edit_outlined, color: palette.textMuted, size: 22),
+                            tooltip: 'Redaktə et',
+                            onPressed: () => onEdit(product),
+                          ),
+                          IconButton(
+                            icon: Icon(Icons.delete_outline, color: AppColors.danger.withValues(alpha: 0.85), size: 22),
+                            tooltip: 'Sil',
+                            onPressed: () => onDelete(product),
+                          ),
+                          Icon(Icons.chevron_right, color: palette.textMuted, size: 22),
+                        ],
+                      ),
                     );
                   },
                 ),

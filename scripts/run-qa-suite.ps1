@@ -9,16 +9,18 @@ if ($LASTEXITCODE -ne 0) { exit 1 }
 Pop-Location
 
 Write-Host "=== 2. API (psclub_qa) ===" -ForegroundColor Cyan
-$p = Get-NetTCPConnection -LocalPort 8080 -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess
+$qaPort = if ($env:QA_API_PORT) { $env:QA_API_PORT } else { '8090' }
+$p = Get-NetTCPConnection -LocalPort $qaPort -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess
 if ($p) { Stop-Process -Id $p -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1 }
 
+$env:QA_API_BASE = "http://127.0.0.1:$qaPort"
 $apiJob = Start-Job -ScriptBlock {
     Set-Location (Join-Path $using:Root 'backend\public')
-    php -S 127.0.0.1:8080 2>&1
+    php -S "127.0.0.1:$($using:qaPort)" 2>&1
 }
 Start-Sleep -Seconds 3
 
-$ping = Invoke-WebRequest -Uri 'http://127.0.0.1:8080/ping.php' -UseBasicParsing
+$ping = Invoke-WebRequest -Uri "http://127.0.0.1:$qaPort/ping.php" -UseBasicParsing
 if ($ping.Content -notmatch 'psclub_qa') {
     Write-Host "API psclub_qa istifadə etmir:" $ping.Content
     Stop-Job $apiJob -ErrorAction SilentlyContinue
@@ -28,6 +30,8 @@ Write-Host "API OK — psclub_qa" -ForegroundColor Green
 
 Write-Host "=== 3. PHP testlər ===" -ForegroundColor Cyan
 Push-Location (Join-Path $Root 'backend')
+php scripts/audit_module_imports.php
+if ($LASTEXITCODE -ne 0) { exit 1 }
 php scripts/test_billing_calculator.php
 if ($LASTEXITCODE -ne 0) { exit 1 }
 php tests/RefundCalculatorTest.php
@@ -38,11 +42,15 @@ php scripts/qa_api_smoke.php
 if ($LASTEXITCODE -ne 0) { exit 1 }
 php scripts/qa_extended_smoke.php
 if ($LASTEXITCODE -ne 0) { exit 1 }
+php scripts/qa_hard_audit.php
+if ($LASTEXITCODE -ne 0) { exit 1 }
+php scripts/check_prod_readiness.php
+if ($LASTEXITCODE -ne 0) { exit 1 }
 Pop-Location
 
 Write-Host "=== 4. Flutter testlər ===" -ForegroundColor Cyan
 Push-Location (Join-Path $Root 'frontend')
-flutter test test/billing_calculator_test.dart test/widget_test.dart
+flutter test test/billing_calculator_test.dart test/session_live_bill_test.dart test/widget_test.dart
 if ($LASTEXITCODE -ne 0) { exit 1 }
 Pop-Location
 

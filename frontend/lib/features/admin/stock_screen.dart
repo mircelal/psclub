@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/api/api_client.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
+import '../../core/utils/json_parse.dart';
 import '../../core/widgets/app_dialog.dart';
+import '../../core/widgets/app_snackbar.dart';
 import '../../services/pos_service.dart';
+import 'product_profile_screen.dart';
 import 'widgets/admin_page_layout.dart';
 
 class StockScreen extends ConsumerStatefulWidget {
@@ -38,6 +42,7 @@ class _StockScreenState extends ConsumerState<StockScreen> {
     int? productId;
     String type = 'in';
     final qtyCtrl = TextEditingController(text: '10');
+    final noteCtrl = TextEditingController();
 
     final ok = await showAppDialog<bool>(
       context: context,
@@ -68,7 +73,13 @@ class _StockScreenState extends ConsumerState<StockScreen> {
               onChanged: (v) => setDlg(() => type = v ?? 'in'),
             ),
             const SizedBox(height: AppSpacing.lg),
-            AppTextField(controller: qtyCtrl, label: 'Miqdar', keyboardType: TextInputType.number),
+            AppTextField(
+              controller: qtyCtrl,
+              label: type == 'adjustment' ? 'Yeni stok miqdarı' : 'Miqdar',
+              keyboardType: TextInputType.number,
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            AppTextField(controller: noteCtrl, label: 'Qeyd (istəyə bağlı)'),
           ],
         ),
       ),
@@ -79,8 +90,19 @@ class _StockScreenState extends ConsumerState<StockScreen> {
     );
 
     if (ok == true && productId != null) {
-      await ref.read(posServiceProvider).addStockMovement(productId!, type, int.tryParse(qtyCtrl.text) ?? 1);
-      _load();
+      try {
+        await ref.read(posServiceProvider).addStockMovement(
+              productId!,
+              type,
+              int.tryParse(qtyCtrl.text) ?? 1,
+              note: noteCtrl.text.trim().isEmpty ? null : noteCtrl.text.trim(),
+            );
+        if (mounted) _load();
+      } catch (e) {
+        if (mounted) {
+          showAppSnackBar(context, ApiClient.messageFromError(e), isError: true);
+        }
+      }
     }
   }
 
@@ -127,6 +149,17 @@ class _StockScreenState extends ConsumerState<StockScreen> {
                               : _alerts.map((a) {
                                   final m = a as Map<String, dynamic>;
                                   return AdminListTile(
+                                    onTap: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => ProductProfileScreen(
+                                            productId: jsonToInt(m['id']),
+                                            initialName: m['name'] as String?,
+                                          ),
+                                        ),
+                                      );
+                                    },
                                     leading: const Icon(Icons.warning_amber, color: AppColors.warning),
                                     title: m['name'] as String,
                                     trailing: Text('${m['quantity']} ədəd', style: const TextStyle(color: AppColors.warning, fontWeight: FontWeight.w700)),
@@ -137,10 +170,30 @@ class _StockScreenState extends ConsumerState<StockScreen> {
                           padding: const EdgeInsets.all(AppSpacing.xxl),
                           children: _movements.map((m) {
                             final x = m as Map<String, dynamic>;
+                            final delta = jsonToInt(x['delta']);
+                            final deltaText = delta > 0 ? '+$delta' : (delta < 0 ? '$delta' : '→ ${jsonToInt(x['quantity'])}');
+                            final label = x['label_az'] as String? ?? x['type'] as String? ?? '';
+                            final by = x['created_by_name'] as String?;
+                            final note = x['note'] as String?;
+                            final balance = x['balance_after'];
+
                             return AdminListTile(
                               title: x['product_name'] as String? ?? '',
-                              subtitle: '${x['type']} • ${x['created_at']}',
-                              trailing: Text('${x['quantity']}', style: const TextStyle(fontWeight: FontWeight.w700)),
+                              subtitle: [
+                                label,
+                                x['created_at'] as String? ?? '',
+                                if (by != null && by.isNotEmpty) 'Edən: $by',
+                                if (note != null && note.isNotEmpty) note,
+                              ].join('\n'),
+                              trailing: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  Text(deltaText, style: const TextStyle(fontWeight: FontWeight.w700)),
+                                  if (balance != null)
+                                    Text('Qalıq: $balance', style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                                ],
+                              ),
                             );
                           }).toList(),
                         ),

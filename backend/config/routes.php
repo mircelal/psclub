@@ -10,6 +10,7 @@ use App\Modules\Auth\AuthController;
 use App\Modules\Coupons\CouponsController;
 use App\Modules\Customers\CustomerGroupsController;
 use App\Modules\Customers\CustomersController;
+use App\Modules\Loyalty\LoyaltyController;
 use App\Modules\Orders\OrdersController;
 use App\Modules\Promotions\PromotionsController;
 use App\Modules\Products\ProductMediaController;
@@ -75,6 +76,7 @@ return function (App $app): void {
         $group->patch('/sessions/{id}/pause', [SessionsController::class, 'pause']);
         $group->patch('/sessions/{id}/resume', [SessionsController::class, 'resume']);
         $group->patch('/sessions/{id}/extend', [SessionsController::class, 'extendPlannedTime']);
+        $group->patch('/sessions/{id}/transfer', [SessionsController::class, 'transferTable']);
         $group->patch('/sessions/{id}/discount', [SessionsController::class, 'setDiscount']);
         $group->patch('/sessions/{id}/customer', [SessionsController::class, 'assignCustomer']);
         $group->post('/sessions/{id}/apply-coupon', [SessionsController::class, 'applyCoupon']);
@@ -107,6 +109,7 @@ return function (App $app): void {
             $admin->put('/product-categories/{id}', [ProductsController::class, 'updateCategory']);
             $admin->delete('/product-categories/{id}', [ProductsController::class, 'destroyCategory']);
             $admin->post('/products', [ProductsController::class, 'store']);
+            $admin->get('/products/{id}', [ProductsController::class, 'show']);
             $admin->put('/products/{id}', [ProductsController::class, 'update']);
             $admin->post('/products/{id}/image', [ProductMediaController::class, 'upload']);
             $admin->delete('/products/{id}', [ProductsController::class, 'destroy']);
@@ -133,6 +136,13 @@ return function (App $app): void {
             $admin->get('/customers/{id}', [CustomersController::class, 'show']);
             $admin->put('/customers/{id}', [CustomersController::class, 'update']);
             $admin->delete('/customers/{id}', [CustomersController::class, 'destroy']);
+            $admin->get('/customers/{id}/loyalty', [LoyaltyController::class, 'customerLoyalty']);
+            $admin->post('/customers/{id}/loyalty/grant', [LoyaltyController::class, 'grant']);
+
+            $admin->get('/loyalty/tiers', [LoyaltyController::class, 'indexTiers']);
+            $admin->post('/loyalty/tiers', [LoyaltyController::class, 'storeTier']);
+            $admin->put('/loyalty/tiers/{id}', [LoyaltyController::class, 'updateTier']);
+            $admin->delete('/loyalty/tiers/{id}', [LoyaltyController::class, 'destroyTier']);
 
             $admin->get('/stock/movements', [StockController::class, 'movements']);
             $admin->post('/stock/movements', [StockController::class, 'storeMovement']);
@@ -152,8 +162,10 @@ return function (App $app): void {
             $admin->get('/orders', [OrdersController::class, 'index']);
             $admin->get('/orders/{id}', [OrdersController::class, 'show']);
             $admin->put('/orders/{id}/adjust', [OrdersController::class, 'adjust']);
+            $admin->post('/orders/{id}/items', [OrdersController::class, 'removeItems']);
             $admin->post('/orders/{id}/refund', [OrdersController::class, 'refund']);
             $admin->delete('/orders/{id}', [OrdersController::class, 'delete']);
+            $admin->post('/orders/{id}/delete', [OrdersController::class, 'delete']);
         })->add($adminGuard);
     })
         ->add(AuditMiddleware::class)

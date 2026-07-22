@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
+import '../theme/cashier_theme.dart';
 
 class EmptyState extends StatelessWidget {
   const EmptyState({
@@ -27,17 +27,29 @@ class EmptyState extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(AppSpacing.xl),
               decoration: BoxDecoration(
-                color: AppColors.surfaceElevated,
+                color: CashierTheme.surfaceSecondary(context),
                 shape: BoxShape.circle,
-                border: Border.all(color: AppColors.border),
+                border: Border.all(color: CashierTheme.border(context)),
               ),
-              child: Icon(icon, size: 40, color: AppColors.textMuted),
+              child: Icon(icon, size: 40, color: CashierTheme.textTertiary(context)),
             ),
             const SizedBox(height: AppSpacing.xl),
-            Text(title, style: Theme.of(context).textTheme.titleMedium, textAlign: TextAlign.center),
+            Text(
+              title,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: CashierTheme.textPrimary(context),
+                  ),
+              textAlign: TextAlign.center,
+            ),
             if (subtitle != null) ...[
               const SizedBox(height: AppSpacing.sm),
-              Text(subtitle!, style: Theme.of(context).textTheme.bodyMedium, textAlign: TextAlign.center),
+              Text(
+                subtitle!,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: CashierTheme.textSecondary(context),
+                    ),
+                textAlign: TextAlign.center,
+              ),
             ],
             if (action != null) ...[
               const SizedBox(height: AppSpacing.xl),

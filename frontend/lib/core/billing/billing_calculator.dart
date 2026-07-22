@@ -21,6 +21,13 @@ class BillingPreview {
 }
 
 class BillingCalculator {
+  /// Müddətli sessiya: aktiv vaxt planlaşdırılan müddəti keçməməlidir (overtime hesablanmır).
+  static int capActiveSecondsForPlanned(int activeSeconds, int? plannedMinutes) {
+    if (plannedMinutes == null || plannedMinutes <= 0) return activeSeconds;
+    final cap = plannedMinutes * 60;
+    return activeSeconds > cap ? cap : activeSeconds;
+  }
+
   static int calculateActiveSeconds({
     required DateTime openedAt,
     required List<({DateTime pausedAt, DateTime? resumedAt})> pauses,
@@ -116,21 +123,27 @@ class BillingCalculator {
     int billingGraceMinutes = 10,
     int? plannedMinutes,
   }) {
-    if (billingMode == 'min_1h_then_30' && plannedMinutes != null && plannedMinutes > 0) {
-      final billed = billableMinutesFromPlanned(
+    if (billingMode == 'min_1h_then_30' && plannedMinutes != null && plannedMinutes! > 0) {
+      final prepaid = billableMinutesFromPlanned(
         plannedMinutes: plannedMinutes,
         minBillingMinutes: minBillingMinutes,
         billingIncrementMinutes: billingIncrementMinutes,
       );
-      final charge = (billed / 60) * hourlyRate;
+      final charge = (prepaid / 60) * hourlyRate;
+
       if (rounding <= 0) return double.parse(charge.toStringAsFixed(2));
       return double.parse(((charge / rounding).round() * rounding).toStringAsFixed(2));
     }
 
-    if (activeSeconds <= 0) return 0;
+    var billedActiveSeconds = activeSeconds;
+    if (plannedMinutes != null && plannedMinutes! > 0) {
+      billedActiveSeconds = capActiveSecondsForPlanned(billedActiveSeconds, plannedMinutes);
+    }
+
+    if (billedActiveSeconds <= 0) return 0;
 
     final billedMinutes = billableMinutes(
-      activeSeconds: activeSeconds,
+      activeSeconds: billedActiveSeconds,
       billingMode: billingMode,
       minBillingMinutes: minBillingMinutes,
       billingIncrementMinutes: billingIncrementMinutes,

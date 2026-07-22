@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Modules\Customers;
 
 use App\Support\ApiResponse;
+use App\Support\LoyaltyService;
 use App\Support\PhoneNormalizer;
 use PDO;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -13,8 +14,10 @@ use Respect\Validation\Validator as v;
 
 final class CustomersController
 {
-    public function __construct(private readonly PDO $pdo)
-    {
+    public function __construct(
+        private readonly PDO $pdo,
+        private readonly LoyaltyService $loyalty
+    ) {
     }
 
     public function index(Request $request, Response $response): Response
@@ -215,6 +218,10 @@ final class CustomersController
                 'products_spent' => (float) ($stats['products_spent'] ?? 0),
                 'time_spent' => (float) ($stats['time_spent'] ?? 0),
                 'play_seconds' => (int) ($stats['play_seconds'] ?? 0),
+            ],
+            'loyalty' => [
+                'balance' => $this->loyalty->getBalance($id),
+                'ledger' => $this->loyalty->getLedger($id, 30),
             ],
             'sessions' => $sessionsStmt->fetchAll(),
         ]);

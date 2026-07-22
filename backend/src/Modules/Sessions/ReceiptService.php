@@ -78,6 +78,29 @@ final class ReceiptService
 
         $lines[] = ['type' => 'text', 'content' => str_repeat('-', 32)];
         $lines[] = ['type' => 'text', 'content' => 'Məhsullar: ' . number_format($bill['products_total'], 2) . ' AZN'];
+        $productDiscount = (float) ($bill['product_discount'] ?? 0);
+        $totalDiscount = (float) ($bill['discount'] ?? 0);
+        if ($productDiscount > 0 && $totalDiscount > $productDiscount + 0.001) {
+            $timeDiscount = round($totalDiscount - $productDiscount, 2);
+            if ($timeDiscount > 0) {
+                $lines[] = ['type' => 'text', 'content' => 'Vaxt endirimi: -' . number_format($timeDiscount, 2) . ' AZN'];
+            }
+            $lines[] = ['type' => 'text', 'content' => 'Məhsul endirimi: -' . number_format($productDiscount, 2) . ' AZN'];
+        } elseif ($productDiscount > 0) {
+            $lines[] = ['type' => 'text', 'content' => 'Məhsul endirimi: -' . number_format($productDiscount, 2) . ' AZN'];
+        } elseif ($totalDiscount > 0) {
+            $lines[] = ['type' => 'text', 'content' => 'Endirim: -' . number_format($totalDiscount, 2) . ' AZN'];
+        }
+        $loyaltyCredit = (float) ($bill['loyalty_credit'] ?? 0);
+        if ($loyaltyCredit > 0) {
+            $lines[] = ['type' => 'text', 'content' => 'Loyallıq bonusu: -' . number_format($loyaltyCredit, 2) . ' AZN'];
+            if ((int) ($bill['bonus_minutes_used'] ?? 0) > 0) {
+                $lines[] = ['type' => 'text', 'content' => '  Saat balansı: ' . (int) $bill['bonus_minutes_used'] . ' dəq'];
+            }
+            if ((float) ($bill['bonus_wallet_used'] ?? 0) > 0) {
+                $lines[] = ['type' => 'text', 'content' => '  Pul balansı: ' . number_format((float) $bill['bonus_wallet_used'], 2) . ' AZN'];
+            }
+        }
         $lines[] = ['type' => 'text', 'content' => 'ÜMUMİ: ' . number_format($bill['total_amount'], 2) . ' AZN', 'bold' => true];
         $lines[] = ['type' => 'text', 'content' => 'Ödəniş: ' . $method];
         if ($method === 'mixed') {

@@ -123,10 +123,20 @@ final class CustomerGroupsController
 
     public function destroy(Request $request, Response $response, array $args): Response
     {
-        $id = (int) $args['id'];
-        $this->pdo->prepare('UPDATE customer_groups SET is_active = 0, updated_at = NOW() WHERE id = ?')->execute([$id]);
+        if (!$this->tableExists()) {
+            return ApiResponse::error('Customer groups not available — run migrations', 503);
+        }
 
-        return ApiResponse::success(['deleted' => true]);
+        $id = (int) $args['id'];
+        $stmt = $this->pdo->prepare('SELECT id FROM customer_groups WHERE id = ? LIMIT 1');
+        $stmt->execute([$id]);
+        if (!$stmt->fetch()) {
+            return ApiResponse::error('Müştəri qrupu tapılmadı', 404);
+        }
+
+        $this->pdo->prepare('DELETE FROM customer_groups WHERE id = ?')->execute([$id]);
+
+        return ApiResponse::success(['deleted' => true, 'id' => $id]);
     }
 
     private function validateBody(array $body): bool

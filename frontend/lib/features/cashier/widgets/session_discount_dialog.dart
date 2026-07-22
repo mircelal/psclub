@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_palette.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/app_dialog.dart';
 
@@ -26,6 +27,7 @@ Future<SessionDiscountResult?> showSessionDiscountDialog(
   double? discountValue,
   bool checkoutMode = false,
   double? currentTotal,
+  bool isCounter = false,
 }) {
   return showDialog<SessionDiscountResult>(
     context: context,
@@ -55,6 +57,7 @@ Future<SessionDiscountResult?> showSessionDiscountDialog(
             checkoutMode: checkoutMode,
             currentTotal: currentTotal,
             compact: compact,
+            isCounter: isCounter,
           ),
         ),
       );
@@ -72,6 +75,7 @@ class _SessionDiscountForm extends StatefulWidget {
     this.checkoutMode = false,
     this.currentTotal,
     this.compact = false,
+    this.isCounter = false,
   });
 
   final double timeCharge;
@@ -82,6 +86,7 @@ class _SessionDiscountForm extends StatefulWidget {
   final bool checkoutMode;
   final double? currentTotal;
   final bool compact;
+  final bool isCounter;
 
   @override
   State<_SessionDiscountForm> createState() => _SessionDiscountFormState();
@@ -125,7 +130,8 @@ class _SessionDiscountFormState extends State<_SessionDiscountForm> {
         );
         return;
       }
-      final discountNeeded = (_subtotal - target).clamp(0, widget.timeCharge);
+      final maxDiscount = widget.isCounter ? _subtotal : widget.timeCharge;
+      final discountNeeded = (_subtotal - target).clamp(0, maxDiscount);
       Navigator.pop(
         context,
         SessionDiscountResult(
@@ -166,7 +172,8 @@ class _SessionDiscountFormState extends State<_SessionDiscountForm> {
     ];
   }
 
-  Widget _modeSelector() {
+  Widget _modeSelector(BuildContext context) {
+    final p = context.palette;
     final options = _modeOptions;
     if (widget.compact || options.length > 2) {
       return Column(
@@ -176,7 +183,7 @@ class _SessionDiscountFormState extends State<_SessionDiscountForm> {
           return Padding(
             padding: const EdgeInsets.only(bottom: AppSpacing.sm),
             child: Material(
-              color: selected ? AppColors.accentSoft : AppColors.surfaceElevated,
+              color: selected ? p.primarySoft : p.surfaceElevated,
               borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
               child: InkWell(
                 onTap: () => setState(() => _mode = opt.$1),
@@ -186,7 +193,7 @@ class _SessionDiscountFormState extends State<_SessionDiscountForm> {
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
                     border: Border.all(
-                      color: selected ? AppColors.accent : AppColors.border,
+                      color: selected ? AppColors.primary : p.border,
                       width: selected ? 1.5 : 1,
                     ),
                   ),
@@ -195,7 +202,7 @@ class _SessionDiscountFormState extends State<_SessionDiscountForm> {
                       Icon(
                         selected ? Icons.radio_button_checked : Icons.radio_button_off,
                         size: 20,
-                        color: selected ? AppColors.accent : AppColors.textMuted,
+                        color: selected ? AppColors.primary : p.textMuted,
                       ),
                       const SizedBox(width: AppSpacing.md),
                       Expanded(
@@ -203,6 +210,7 @@ class _SessionDiscountFormState extends State<_SessionDiscountForm> {
                           opt.$2,
                           style: TextStyle(
                             fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                            color: p.textPrimary,
                           ),
                         ),
                       ),
@@ -227,6 +235,8 @@ class _SessionDiscountFormState extends State<_SessionDiscountForm> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -238,7 +248,7 @@ class _SessionDiscountFormState extends State<_SessionDiscountForm> {
               Container(
                 padding: const EdgeInsets.all(AppSpacing.md),
                 decoration: BoxDecoration(
-                  color: AppColors.primarySoft,
+                  color: p.primarySoft,
                   borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
                 ),
                 child: const Icon(Icons.local_offer_outlined, color: AppColors.primary, size: 22),
@@ -254,9 +264,11 @@ class _SessionDiscountFormState extends State<_SessionDiscountForm> {
                     ),
                     const SizedBox(height: AppSpacing.xs),
                     Text(
-                      widget.checkoutMode
-                          ? 'Yalnız PlayStation vaxtına endirim (məhsullar dəyişməz)'
-                          : 'Endirim yalnız vaxt haqqına tətbiq olunur',
+                      widget.isCounter
+                          ? 'Endirim məhsulların ümumi məbləğinə tətbiq olunur'
+                          : widget.checkoutMode
+                              ? 'Yalnız PlayStation vaxtına endirim (məhsullar dəyişməz)'
+                              : 'Endirim yalnız vaxt haqqına tətbiq olunur',
                       style: Theme.of(context).textTheme.bodyMedium,
                     ),
                   ],
@@ -264,7 +276,7 @@ class _SessionDiscountFormState extends State<_SessionDiscountForm> {
               ),
               IconButton(
                 onPressed: () => Navigator.pop(context),
-                icon: const Icon(Icons.close, size: 20, color: AppColors.textMuted),
+                icon: Icon(Icons.close, size: 20, color: p.textMuted),
               ),
             ],
           ),
@@ -279,9 +291,9 @@ class _SessionDiscountFormState extends State<_SessionDiscountForm> {
                 Container(
                   padding: const EdgeInsets.all(AppSpacing.lg),
                   decoration: BoxDecoration(
-                    color: AppColors.surfaceElevated,
+                    color: p.surfaceElevated,
                     borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-                    border: Border.all(color: AppColors.border),
+                    border: Border.all(color: p.border),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -291,11 +303,19 @@ class _SessionDiscountFormState extends State<_SessionDiscountForm> {
                           'Vaxt haqqı: ${widget.timeCharge.toStringAsFixed(2)} ₼',
                           style: Theme.of(context).textTheme.bodyMedium,
                         ),
-                      const SizedBox(height: AppSpacing.xs),
-                      Text(
-                        'Məhsullar: ${widget.productsTotal.toStringAsFixed(2)} ₼ (endirimsiz)',
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
+                      if (widget.timeCharge > 0 && widget.productsTotal > 0) const SizedBox(height: AppSpacing.xs),
+                      if (widget.productsTotal > 0)
+                        Text(
+                          'Məhsullar: ${widget.productsTotal.toStringAsFixed(2)} ₼ (endirimsiz)',
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                      if (widget.isCounter) ...[
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(
+                          'Cəmi: ${(widget.timeCharge + widget.productsTotal).toStringAsFixed(2)} ₼',
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                      ],
                       if (widget.currentDiscount > 0) ...[
                         const SizedBox(height: AppSpacing.sm),
                         Text(
@@ -309,7 +329,7 @@ class _SessionDiscountFormState extends State<_SessionDiscountForm> {
                 const SizedBox(height: AppSpacing.xl),
                 Text('Endirim növü', style: Theme.of(context).textTheme.titleSmall),
                 const SizedBox(height: AppSpacing.md),
-                _modeSelector(),
+                _modeSelector(context),
                 const SizedBox(height: AppSpacing.xl),
                 if (_mode == 'final')
                   AppTextField(

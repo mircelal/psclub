@@ -247,6 +247,107 @@ if (!$r['ok']) {
     pass('close counter');
 }
 
+// 5b Void empty counter — ləğv sessiya sifariş siyahısında görünməməlidir
+$r = request('POST', '/api/sessions', ['session_type' => 'counter'], $cashierToken);
+$voidCounterId = (int) ($r['data']['id'] ?? $r['data']['session']['id'] ?? 0);
+if (!$r['ok'] || $voidCounterId <= 0) {
+    fail('open counter for void test', $r['message']);
+} else {
+    pass('open counter for void test');
+}
+
+$r = request('POST', "/api/sessions/{$voidCounterId}/close", [
+    'method' => 'cash',
+    'cash_amount' => 0,
+    'card_amount' => 0,
+], $cashierToken);
+if (!$r['ok'] || empty($r['data']['voided'])) {
+    fail('void empty counter close', $r['message'] . ' voided=' . json_encode($r['data']['voided'] ?? null));
+} else {
+    pass('void empty counter close');
+}
+
+$today = date('Y-m-d');
+$r = request('GET', "/api/orders?from={$today}&to={$today}", null, $adminToken);
+if (!$r['ok']) {
+    fail('orders list for void check', $r['message']);
+} else {
+    $foundVoid = false;
+    foreach ($r['data'] ?? [] as $order) {
+        if (!is_array($order)) {
+            continue;
+        }
+        if ((int) ($order['id'] ?? 0) === $voidCounterId) {
+            $foundVoid = true;
+            break;
+        }
+    }
+    if ($foundVoid) {
+        fail('void counter not in orders list');
+    } else {
+        pass('void counter not in orders list');
+    }
+}
+
+// 5c Hədiyyə kassa — məhsul + 100% endirim sifariş siyahısında qalmalıdır
+$r = request('POST', '/api/sessions', ['session_type' => 'counter'], $cashierToken);
+$giftCounterId = (int) ($r['data']['id'] ?? $r['data']['session']['id'] ?? 0);
+if (!$r['ok'] || $giftCounterId <= 0) {
+    fail('open counter for gift test', $r['message']);
+} else {
+    pass('open counter for gift test');
+}
+
+$r = request('POST', "/api/sessions/{$giftCounterId}/items", ['product_id' => 2, 'quantity' => 1], $cashierToken);
+if (!$r['ok']) {
+    fail('gift counter add item', $r['message']);
+} else {
+    pass('gift counter add item');
+}
+
+$r = request('PATCH', "/api/sessions/{$giftCounterId}/discount", [
+    'discount_type' => 'percent',
+    'discount_value' => 100,
+    'discount_applies_to' => 'all',
+], $cashierToken);
+if (!$r['ok']) {
+    fail('gift counter 100% discount', $r['message']);
+} else {
+    pass('gift counter 100% discount');
+}
+
+$r = request('POST', "/api/sessions/{$giftCounterId}/close", [
+    'method' => 'cash',
+    'cash_amount' => 0,
+    'card_amount' => 0,
+], $cashierToken);
+if (!$r['ok'] || !empty($r['data']['voided'])) {
+    fail('close gift counter', $r['message'] . ' voided=' . json_encode($r['data']['voided'] ?? null));
+} else {
+    pass('close gift counter');
+}
+
+$r = request('GET', "/api/orders?from={$today}&to={$today}", null, $adminToken);
+if (!$r['ok']) {
+    fail('orders list for gift check', $r['message']);
+} else {
+    $foundGift = false;
+    foreach ($r['data'] ?? [] as $order) {
+        if (!is_array($order)) {
+            continue;
+        }
+        if ((int) ($order['id'] ?? 0) === $giftCounterId) {
+            $foundGift = true;
+            break;
+        }
+    }
+    if (!$foundGift) {
+        fail('gift counter in orders list');
+    } else {
+        pass('gift counter in orders list');
+    }
+}
+
 // 6 Shift totals increased
 $r = request('GET', '/api/shifts/current', null, $cashierToken);
 $cashSales = (float) ($r['data']['totals']['cash_sales'] ?? 0);

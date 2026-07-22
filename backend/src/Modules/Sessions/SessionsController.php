@@ -13,8 +13,11 @@ use App\Support\ApiResponse;
 use App\Support\BusinessBillingColumns;
 use App\Support\BillingCalculator;
 use App\Support\DatabaseClock;
+use App\Support\StockMovementLabels;
 use App\Support\DiscountCalculator;
+use App\Support\LoyaltyService;
 use App\Support\PromotionService;
+use App\Support\SchemaMigrator;
 use PDO;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -31,6 +34,7 @@ final class SessionsController
         private readonly SessionSetsController $sessionSets,
         private readonly ShiftService $shifts,
         private readonly PromotionService $promotions,
+        private readonly LoyaltyService $loyalty,
     ) {
     }
 
@@ -39,6 +43,7 @@ final class SessionsController
         $stmt = $this->pdo->query(
             "SELECT s.*, t.name AS table_name, t.status AS table_status,
                     c.name AS customer_name, c.phone AS customer_phone,
+                    c.bonus_minutes AS customer_bonus_minutes, c.bonus_wallet AS customer_bonus_wallet,
                     cp.code AS coupon_code
              FROM sessions s
              LEFT JOIN tables t ON t.id = s.table_id
@@ -228,6 +233,10 @@ final class SessionsController
         if (!in_array($appliesTo, ['all', 'time_only'], true)) {
             return ApiResponse::error('Invalid discount scope', 422);
         }
+        $isCounter = ($session['session_type'] ?? 'table') === 'counter';
+        if ($isCounter && $appliesTo === 'time_only') {
+            $appliesTo = 'all';
+        }
 
         $bill = $this->calculateBill($session);
         $timeCharge = (float) $bill['time_charge'];
@@ -235,7 +244,7 @@ final class SessionsController
         $base = $appliesTo === 'time_only' ? $timeCharge : $subtotal;
 
         if ($type !== 'none') {
-            $limitError = $this->promotions->validateManualDiscount($user, $type, $value, $base);
+            $limitError = $this->promotions->validateManualDiscount($user, $type, $value, $base, $isCounter);
             if ($limitError !== null) {
                 return ApiResponse::error($limitError, 422);
             }
@@ -386,7 +395,17 @@ final class SessionsController
             $existing->execute([$sessionId, $productId]);
             $row = $existing->fetch();
 
-            $this->stock->applyStockChange($productId, 'sale', $qty, 'sale', 'session', $sessionId, (int) $user['id']);
+            $actor = StockMovementLabels::actorLabel($user['full_name'] ?? null, $user['username'] ?? null);
+            $this->stock->applyStockChange(
+                $productId,
+                'sale',
+                $qty,
+                'sale',
+                'session',
+                $sessionId,
+                (int) $user['id'],
+                sprintf('%s: %s səbətə +%d (sessiya #%d)', $actor, $product['name'], $qty, $sessionId)
+            );
 
             if ($row) {
                 $newQty = (int) $row['quantity'] + $qty;
@@ -437,20 +456,50 @@ final class SessionsController
         $oldQty = (int) $item['quantity'];
         $productId = (int) $item['product_id'];
 
+        $productName = (string) ($item['product_name'] ?? 'Məhsul');
+        $actor = StockMovementLabels::actorLabel($user['full_name'] ?? null, $user['username'] ?? null);
+
         $this->pdo->beginTransaction();
         try {
             if ($newQty <= 0) {
                 if ($productId > 0) {
-                    $this->stock->applyStockChange($productId, 'in', $oldQty, 'return', 'session', $sessionId, (int) $user['id']);
+                    $this->stock->applyStockChange(
+                        $productId,
+                        'in',
+                        $oldQty,
+                        'return',
+                        'session',
+                        $sessionId,
+                        (int) $user['id'],
+                        sprintf('%s: %s səbətdən silindi −%d (sessiya #%d)', $actor, $productName, $oldQty, $sessionId)
+                    );
                 }
                 $this->pdo->prepare('DELETE FROM session_items WHERE id = ?')->execute([$itemId]);
             } else {
                 $delta = $newQty - $oldQty;
                 if ($delta !== 0 && $productId > 0) {
                     if ($delta > 0) {
-                        $this->stock->applyStockChange($productId, 'sale', $delta, 'sale', 'session', $sessionId, (int) $user['id']);
+                        $this->stock->applyStockChange(
+                            $productId,
+                            'sale',
+                            $delta,
+                            'sale',
+                            'session',
+                            $sessionId,
+                            (int) $user['id'],
+                            sprintf('%s: %s miqdar +%d (%d→%d, sessiya #%d)', $actor, $productName, $delta, $oldQty, $newQty, $sessionId)
+                        );
                     } else {
-                        $this->stock->applyStockChange($productId, 'in', abs($delta), 'return', 'session', $sessionId, (int) $user['id']);
+                        $this->stock->applyStockChange(
+                            $productId,
+                            'in',
+                            abs($delta),
+                            'return',
+                            'session',
+                            $sessionId,
+                            (int) $user['id'],
+                            sprintf('%s: %s miqdar −%d (%d→%d, sessiya #%d)', $actor, $productName, abs($delta), $oldQty, $newQty, $sessionId)
+                        );
                     }
                 }
                 $this->pdo->prepare('UPDATE session_items SET quantity = ? WHERE id = ?')->execute([$newQty, $itemId]);
@@ -489,12 +538,24 @@ final class SessionsController
             return ApiResponse::error('Paket məhsulları səbətdən silinə bilməz', 400);
         }
 
+        $productName = (string) ($item['product_name'] ?? 'Məhsul');
+        $actor = StockMovementLabels::actorLabel($user['full_name'] ?? null, $user['username'] ?? null);
+
         $this->pdo->beginTransaction();
         try {
             $productId = (int) ($item['product_id'] ?? 0);
             $qty = (int) $item['quantity'];
             if ($productId > 0 && $qty > 0) {
-                $this->stock->applyStockChange($productId, 'in', $qty, 'return', 'session', $sessionId, (int) $user['id']);
+                $this->stock->applyStockChange(
+                    $productId,
+                    'in',
+                    $qty,
+                    'return',
+                    'session',
+                    $sessionId,
+                    (int) $user['id'],
+                    sprintf('%s: %s səbətdən silindi −%d (sessiya #%d)', $actor, $productName, $qty, $sessionId)
+                );
             }
             $this->pdo->prepare('DELETE FROM session_items WHERE id = ? AND session_id = ?')->execute([$itemId, $sessionId]);
             $this->pdo->commit();
@@ -531,42 +592,157 @@ final class SessionsController
         }
 
         $currentPlanned = isset($session['planned_minutes']) ? (int) $session['planned_minutes'] : 0;
-        if ($currentPlanned <= 0) {
-            return ApiResponse::error('Müddətsiz sessiya uzadıla bilməz', 400);
-        }
-
         if (!empty($session['set_id']) || (float) ($session['set_price_snapshot'] ?? 0) > 0) {
             return ApiResponse::error('Paket sessiyasında müddət uzadıla bilməz — sabit paket qiyməti', 400);
         }
 
         $timing = $this->businessTiming();
-        $add = (int) ($body['add_minutes'] ?? $timing['extend_step_minutes']);
-        if ($add !== $timing['extend_step_minutes']) {
+        $step = $timing['extend_step_minutes'];
+        $add = (int) ($body['add_minutes'] ?? $step);
+        if ($add < $step || $add % $step !== 0) {
             return ApiResponse::error(
-                'Yalnız ' . $timing['extend_step_minutes'] . ' dəqiqəlik uzatma mümkündür',
-                422
+                'Uzatma ' . $step . ' dəqiqə və onun çoxluğu olmalıdır (məs. ' . $step . ', ' . ($step * 2) . ')',
+                422,
+                ['code' => 'extend_minutes_step', 'step' => $step]
             );
         }
 
-        $bill = $this->calculateBill($session);
-        $activeSeconds = (int) $bill['active_seconds'];
-        $minSeconds = $timing['min_open_minutes'] * 60;
-        $remaining = $bill['remaining_seconds'] ?? null;
-        $firstHourDone = $activeSeconds >= $minSeconds;
-        $expired = $remaining !== null && $remaining <= 0;
-
-        if (!$firstHourDone && !$expired) {
-            return ApiResponse::error(
-                'İlk ' . $timing['min_open_minutes'] . ' dəqiqə bitməyib — uzatma hələ aktiv deyil',
-                400
-            );
+        if ($currentPlanned <= 0) {
+            $bill = $this->calculateBill($session);
+            $activeMinutes = max(1, (int) ceil((int) ($bill['active_seconds'] ?? 0) / 60));
+            $currentPlanned = max($timing['min_open_minutes'], $activeMinutes);
         }
 
+        $maxPlanned = 180;
         $newPlanned = $currentPlanned + $add;
+        if ($newPlanned > $maxPlanned) {
+            return ApiResponse::error(
+                'Maksimum planlaşdırılmış müddət ' . $maxPlanned . ' dəqiqədir',
+                422,
+                ['code' => 'max_planned_minutes', 'max' => $maxPlanned]
+            );
+        }
         $this->pdo->prepare('UPDATE sessions SET planned_minutes = ?, updated_at = NOW() WHERE id = ?')
             ->execute([$newPlanned, $sessionId]);
 
         return ApiResponse::success($this->enrichSession($this->findSession($sessionId)));
+    }
+
+    public function transferTable(Request $request, Response $response, array $args): Response
+    {
+        $sessionId = (int) $args['id'];
+        $body = (array) $request->getParsedBody();
+        $user = $request->getAttribute('user');
+        if ($denied = ShiftsController::assertCashierHasOpenShift($this->shifts, $user)) {
+            return $denied;
+        }
+
+        if (!v::key('target_table_id', v::intVal()->positive())->validate($body)) {
+            return ApiResponse::error('Validation failed', 422);
+        }
+
+        $tariffMode = (string) ($body['tariff_mode'] ?? 'keep');
+        if (!in_array($tariffMode, ['keep', 'target'], true)) {
+            return ApiResponse::error('Invalid tariff_mode', 422);
+        }
+
+        $targetTableId = (int) $body['target_table_id'];
+        $tariffId = isset($body['tariff_id']) ? (int) $body['tariff_id'] : null;
+
+        $session = $this->findSession($sessionId);
+        if (!$session || !in_array($session['status'], ['active', 'paused'], true)) {
+            return ApiResponse::error('Session not active', 400);
+        }
+        if (($session['session_type'] ?? 'table') === 'counter') {
+            return ApiResponse::error('Kassa satışı başqa masaya köçürülə bilməz', 400);
+        }
+
+        $sourceTableId = (int) ($session['table_id'] ?? 0);
+        if ($sourceTableId <= 0) {
+            return ApiResponse::error('Session has no table', 400);
+        }
+        if ($targetTableId === $sourceTableId) {
+            return ApiResponse::error('Hədəf masa mənbə ilə eyni ola bilməz', 422);
+        }
+
+        $setPrice = (float) ($session['set_price_snapshot'] ?? 0);
+        if ($tariffMode === 'target' && $setPrice > 0) {
+            return ApiResponse::error('Paket sessiyasında yalnız cari tarif saxlanaraq köçürülə bilər', 400);
+        }
+
+        $targetStmt = $this->pdo->prepare('SELECT * FROM tables WHERE id = ? AND is_active = 1');
+        $targetStmt->execute([$targetTableId]);
+        $targetTable = $targetStmt->fetch();
+        if (!$targetTable) {
+            return ApiResponse::error('Target table not found', 404);
+        }
+        if ($targetTable['status'] !== 'empty') {
+            return ApiResponse::error('Hədəf masa boş deyil', 409);
+        }
+
+        $check = $this->pdo->prepare("SELECT id FROM sessions WHERE table_id = ? AND status IN ('active','paused')");
+        $check->execute([$targetTableId]);
+        if ($check->fetch()) {
+            return ApiResponse::error('Hədəf masada artıq aktiv sessiya var', 409);
+        }
+
+        $previousRate = (float) ($session['hourly_rate_snapshot'] ?? 0);
+        $newRate = $previousRate;
+        $newTariffId = $session['tariff_id'] ?? null;
+        $newTariffName = $session['tariff_name_snapshot'] ?? null;
+
+        if ($tariffMode === 'target') {
+            $resolved = $this->resolveTableTariff($targetTableId, $tariffId);
+            if ($resolved === false) {
+                return ApiResponse::error('Tariff is required', 422, ['code' => 'tariff_required']);
+            }
+            [$newRate, $newTariffId, $newTariffName] = $resolved;
+        }
+
+        $sourceName = (string) ($session['table_name'] ?? 'Masa');
+        $targetName = (string) ($targetTable['name'] ?? 'Masa');
+        $sessionStatus = (string) $session['status'];
+
+        $this->pdo->beginTransaction();
+        try {
+            $this->pdo->prepare("UPDATE tables SET status = 'empty', updated_at = NOW() WHERE id = ?")
+                ->execute([$sourceTableId]);
+
+            if ($tariffMode === 'target') {
+                $this->pdo->prepare(
+                    'UPDATE sessions SET table_id = ?, hourly_rate_snapshot = ?, tariff_id = ?, tariff_name_snapshot = ?, updated_at = NOW() WHERE id = ?'
+                )->execute([$targetTableId, $newRate, $newTariffId, $newTariffName, $sessionId]);
+            } else {
+                $this->pdo->prepare('UPDATE sessions SET table_id = ?, updated_at = NOW() WHERE id = ?')
+                    ->execute([$targetTableId, $sessionId]);
+            }
+
+            $this->pdo->prepare("UPDATE tables SET status = ?, updated_at = NOW() WHERE id = ?")
+                ->execute([$sessionStatus, $targetTableId]);
+
+            $this->pdo->commit();
+        } catch (\Throwable $e) {
+            $this->pdo->rollBack();
+            throw $e;
+        }
+
+        $updated = $this->findSession($sessionId);
+        if ($tariffMode === 'target') {
+            $updated = $this->syncDiscount($updated);
+        }
+
+        return ApiResponse::success([
+            'session' => $this->enrichSession($updated),
+            'transfer_summary' => [
+                'from_table_id' => $sourceTableId,
+                'from_table_name' => $sourceName,
+                'to_table_id' => $targetTableId,
+                'to_table_name' => $targetName,
+                'tariff_mode' => $tariffMode,
+                'previous_hourly_rate' => round($previousRate, 2),
+                'new_hourly_rate' => round($newRate, 2),
+            ],
+        ]);
     }
 
     private function togglePause(Request $request, int $sessionId, bool $pause): Response
@@ -612,7 +788,29 @@ final class SessionsController
         if (!$session) {
             return ApiResponse::error('Session not found', 404);
         }
-        return ApiResponse::success($this->calculateBill($session));
+
+        $bill = $this->calculateBill($session);
+        $query = $request->getQueryParams();
+        $redeemMinutes = max(0, (int) ($query['redeem_bonus_minutes'] ?? 0));
+        $redeemWallet = max(0, (float) ($query['redeem_bonus_wallet'] ?? 0));
+        if ($redeemMinutes > 0 || $redeemWallet > 0) {
+            $customerId = (int) ($session['customer_id'] ?? 0);
+            if ($customerId <= 0) {
+                return ApiResponse::error('Bonus üçün müştəri təyin edilməlidir', 422);
+            }
+            $balance = $this->loyalty->getBalance($customerId);
+            $bill = $this->loyalty->applyBonusToBill(
+                $bill,
+                $redeemMinutes,
+                $redeemWallet,
+                $this->loyalty->resolveHourlyRate($session),
+                $balance
+            );
+            $bill['customer_bonus_minutes'] = $balance['bonus_minutes'];
+            $bill['customer_bonus_wallet'] = $balance['bonus_wallet'];
+        }
+
+        return ApiResponse::success($bill);
     }
 
     public function close(Request $request, Response $response, array $args): Response
@@ -639,7 +837,23 @@ final class SessionsController
 
         $session = $this->syncDiscount($session);
         $closedAt = $this->clock->now();
-        $bill = $this->calculateBill($session, closingAt: $closedAt);
+        $baseBill = $this->calculateBill($session, closingAt: $closedAt);
+
+        $redeemMinutes = max(0, (int) ($body['redeem_bonus_minutes'] ?? 0));
+        $redeemWallet = max(0, (float) ($body['redeem_bonus_wallet'] ?? 0));
+        $customerId = (int) ($session['customer_id'] ?? 0);
+        if (($redeemMinutes > 0 || $redeemWallet > 0) && $customerId <= 0) {
+            return ApiResponse::error('Bonus üçün müştəri təyin edilməlidir', 422);
+        }
+
+        $balance = $customerId > 0 ? $this->loyalty->getBalance($customerId) : null;
+        $bill = $this->loyalty->applyBonusToBill(
+            $baseBill,
+            $redeemMinutes,
+            $redeemWallet,
+            $this->loyalty->resolveHourlyRate($session),
+            $balance
+        );
 
         $cash = (float) ($body['cash_amount'] ?? 0);
         $card = (float) ($body['card_amount'] ?? 0);
@@ -657,24 +871,78 @@ final class SessionsController
             return ApiResponse::error('Payment amounts do not match total', 422);
         }
 
+        $itemStmt = $this->pdo->prepare('SELECT COUNT(*) FROM session_items WHERE session_id = ?');
+        $itemStmt->execute([$sessionId]);
+        $itemCount = (int) $itemStmt->fetchColumn();
+
         $isCounter = ($session['session_type'] ?? 'table') === 'counter';
         if ($isCounter) {
-            $itemStmt = $this->pdo->prepare('SELECT COUNT(*) FROM session_items WHERE session_id = ?');
-            $itemStmt->execute([$sessionId]);
-            $itemCount = (int) $itemStmt->fetchColumn();
-            if ($itemCount > 0 && round($total, 2) <= 0) {
+            $hasGiftDiscount = (float) $bill['discount'] > 0 && round($total, 2) <= 0;
+            if ($itemCount > 0 && round($total, 2) <= 0 && !$hasGiftDiscount) {
                 return ApiResponse::error('Səbətdə məhsul var — əvvəlcə səbəti təmizləyin və ya ödəniş alın', 422);
             }
-            if ($itemCount > 0 && round($cash + $card, 2) < round($total, 2)) {
+            if ($itemCount > 0 && round($total, 2) > 0 && round($cash + $card, 2) < round($total, 2)) {
                 return ApiResponse::error('Birbaşa satış üçün tam ödəniş tələb olunur', 422);
             }
+        }
+
+        if ($this->isVoidSession($bill, $itemCount)) {
+            SchemaMigrator::ensureOrderDeletedState($this->pdo);
+
+            $this->pdo->beginTransaction();
+            try {
+                $this->pdo->prepare(
+                    'UPDATE sessions SET status = \'closed\', closed_at = ?, closed_by = ?,
+                     time_charge = ?, products_total = ?, discount = ?, total_amount = ?,
+                     bonus_minutes_used = ?, bonus_wallet_used = ?,
+                     active_seconds = ?, order_state = \'deleted\', updated_at = NOW()
+                     WHERE id = ?'
+                )->execute([
+                    $closedAt,
+                    (int) $user['id'],
+                    $bill['time_charge'],
+                    $bill['products_total'],
+                    $bill['discount'],
+                    $total,
+                    (int) ($bill['bonus_minutes_used'] ?? 0),
+                    (float) ($bill['bonus_wallet_used'] ?? 0),
+                    $bill['active_seconds'],
+                    $sessionId,
+                ]);
+
+                if (!empty($session['table_id'])) {
+                    $this->pdo->prepare("UPDATE tables SET status = 'empty', updated_at = NOW() WHERE id = ?")
+                        ->execute([$session['table_id']]);
+                }
+
+                $openPause = $this->pdo->prepare('SELECT id FROM session_pauses WHERE session_id = ? AND resumed_at IS NULL');
+                $openPause->execute([$sessionId]);
+                if ($openPause->fetch()) {
+                    $this->pdo->prepare(
+                        'UPDATE session_pauses SET resumed_at = NOW() WHERE session_id = ? AND resumed_at IS NULL'
+                    )->execute([$sessionId]);
+                }
+
+                $this->pdo->commit();
+            } catch (\Throwable $e) {
+                $this->pdo->rollBack();
+                throw $e;
+            }
+
+            return ApiResponse::success([
+                'voided' => true,
+                'session' => $this->enrichSession($this->findSession($sessionId)),
+                'bill' => $bill,
+            ]);
         }
 
         $this->pdo->beginTransaction();
         try {
             $this->pdo->prepare(
                 'UPDATE sessions SET status = \'closed\', closed_at = ?, closed_by = ?,
-                 time_charge = ?, products_total = ?, discount = ?, total_amount = ?, active_seconds = ?, updated_at = NOW()
+                 time_charge = ?, products_total = ?, discount = ?, total_amount = ?,
+                 bonus_minutes_used = ?, bonus_wallet_used = ?,
+                 active_seconds = ?, updated_at = NOW()
                  WHERE id = ?'
             )->execute([
                 $closedAt,
@@ -683,6 +951,8 @@ final class SessionsController
                 $bill['products_total'],
                 $bill['discount'],
                 $total,
+                (int) ($bill['bonus_minutes_used'] ?? 0),
+                (float) ($bill['bonus_wallet_used'] ?? 0),
                 $bill['active_seconds'],
                 $sessionId,
             ]);
@@ -706,6 +976,16 @@ final class SessionsController
                 )->execute([$couponId, $sessionId, $bill['discount']]);
             }
 
+            if ($customerId > 0) {
+                $this->loyalty->commitRedemption(
+                    $customerId,
+                    $sessionId,
+                    (int) ($bill['bonus_minutes_used'] ?? 0),
+                    (float) ($bill['bonus_wallet_used'] ?? 0),
+                    (int) $user['id']
+                );
+            }
+
             $openPause = $this->pdo->prepare('SELECT id FROM session_pauses WHERE session_id = ? AND resumed_at IS NULL');
             $openPause->execute([$sessionId]);
             if ($openPause->fetch()) {
@@ -718,6 +998,10 @@ final class SessionsController
         } catch (\Throwable $e) {
             $this->pdo->rollBack();
             throw $e;
+        }
+
+        if ($customerId > 0 && $total > 0) {
+            $this->loyalty->processTierRewards($customerId, $sessionId, (int) $user['id'], $total);
         }
 
         $closed = $this->findSession($sessionId);
@@ -735,6 +1019,7 @@ final class SessionsController
         $stmt = $this->pdo->prepare(
             'SELECT s.*, t.name AS table_name,
                     c.name AS customer_name, c.phone AS customer_phone, c.customer_group_id,
+                    c.bonus_minutes AS customer_bonus_minutes, c.bonus_wallet AS customer_bonus_wallet,
                     cp.code AS coupon_code, cp.name AS coupon_name
              FROM sessions s
              LEFT JOIN tables t ON t.id = s.table_id
@@ -744,6 +1029,14 @@ final class SessionsController
         );
         $stmt->execute([$id]);
         $row = $stmt->fetch();
+        if ($row) {
+            if (isset($row['customer_bonus_minutes'])) {
+                $row['customer_bonus_minutes'] = (int) $row['customer_bonus_minutes'];
+            }
+            if (isset($row['customer_bonus_wallet'])) {
+                $row['customer_bonus_wallet'] = (float) $row['customer_bonus_wallet'];
+            }
+        }
         return $row ?: null;
     }
 
@@ -804,6 +1097,18 @@ final class SessionsController
         $session['pauses'] = $this->getPauses((int) $session['id']);
         $session['items'] = $this->getItems((int) $session['id']);
         $session['bill_preview'] = $this->calculateBill($session);
+        $loyalty = $this->loyalty->previewMaxBonus($session['bill_preview'], $session);
+        $session['bill_preview']['customer_bonus_minutes'] = $loyalty['customer_bonus_minutes'];
+        $session['bill_preview']['customer_bonus_wallet'] = $loyalty['customer_bonus_wallet'];
+        if ($loyalty['loyalty_preview'] !== null) {
+            $session['bill_preview']['loyalty_preview'] = $loyalty['loyalty_preview'];
+        }
+        if (isset($session['customer_bonus_minutes'])) {
+            $session['customer_bonus_minutes'] = (int) $session['customer_bonus_minutes'];
+        }
+        if (isset($session['customer_bonus_wallet'])) {
+            $session['customer_bonus_wallet'] = (float) $session['customer_bonus_wallet'];
+        }
         $promo = $this->promotions->findBestForSession($session, (float) ($session['bill_preview']['time_charge'] ?? 0));
         $session['active_promotion'] = $promo ? [
             'id' => (int) $promo['id'],
@@ -831,6 +1136,14 @@ final class SessionsController
         );
 
         $isCounter = ($session['session_type'] ?? 'table') === 'counter';
+        $setPrice = (float) ($session['set_price_snapshot'] ?? 0);
+        if ($setPrice <= 0) {
+            $plannedMinutesForCap = isset($session['planned_minutes']) ? (int) $session['planned_minutes'] : 0;
+            $activeSeconds = $this->billing->capActiveSecondsForPlanned(
+                $activeSeconds,
+                $plannedMinutesForCap > 0 ? $plannedMinutesForCap : null
+            );
+        }
         $bizSelect = BusinessBillingColumns::selectSql($this->pdo, [
             'billing_mode', 'billing_rounding', 'time_billing_enabled',
         ]);
@@ -839,7 +1152,6 @@ final class SessionsController
         );
         $timing = BusinessBillingColumns::timingFromRow($this->pdo, $biz);
         $timeBilling = !$isCounter && (!isset($biz['time_billing_enabled']) || (bool) $biz['time_billing_enabled']);
-        $setPrice = (float) ($session['set_price_snapshot'] ?? 0);
         if ($setPrice > 0) {
             $timeCharge = round($setPrice, 2);
             $productsTotal = $this->billing->calculateProductsTotal($items, true);
@@ -862,16 +1174,22 @@ final class SessionsController
         $subtotal = $timeCharge + $productsTotal;
         $discountType = $session['discount_type'] ?? 'none';
         $discountAppliesTo = $session['discount_applies_to'] ?? 'time_only';
-        $resolved = $this->promotions->resolveDiscount($session, $timeCharge, $productsTotal);
+        $resolved = $this->promotions->resolveDiscount($session, $timeCharge, $productsTotal, 0.0, $items);
         $discount = $resolved['amount'];
         $promotion = $resolved['promotion'];
         $customerGroup = $resolved['customer_group'];
+        $productDiscount = (float) ($resolved['product_discount'] ?? 0);
+        $activeProductPromotions = $resolved['active_product_promotions'] ?? [];
+        $itemDiscounts = $resolved['item_discounts'] ?? [];
         $displayCustomerGroup = $this->promotions->displayCustomerGroup($session);
         if ($discountType !== 'none') {
             $base = $discountAppliesTo === 'time_only' ? $timeCharge : $subtotal;
             $discount = DiscountCalculator::amount($base, $discountType, (float) ($session['discount_value'] ?? 0));
             $promotion = null;
             $customerGroup = null;
+            $productDiscount = 0.0;
+            $activeProductPromotions = [];
+            $itemDiscounts = [];
         }
         $discountValue = (float) ($session['discount_value'] ?? 0);
         $total = round($subtotal - $discount, 2);
@@ -904,6 +1222,9 @@ final class SessionsController
                 'discount_type' => (string) $promotion['discount_type'],
                 'discount_value' => (float) $promotion['discount_value'],
             ] : null,
+            'product_discount' => $productDiscount,
+            'active_product_promotions' => $activeProductPromotions,
+            'item_discounts' => $itemDiscounts,
             'customer_group_id' => $customerGroup ? (int) $customerGroup['id'] : null,
             'customer_group_name' => $customerGroup ? (string) $customerGroup['name'] : null,
             'customer_group_discount_type' => $customerGroup ? (string) $customerGroup['discount_type'] : null,
@@ -966,6 +1287,12 @@ final class SessionsController
 
     private function applySessionSetItems(int $sessionId, array $set, int $userId): void
     {
+        $userStmt = $this->pdo->prepare('SELECT full_name, username FROM users WHERE id = ?');
+        $userStmt->execute([$userId]);
+        $userRow = $userStmt->fetch() ?: [];
+        $actor = StockMovementLabels::actorLabel($userRow['full_name'] ?? null, $userRow['username'] ?? null);
+        $setName = (string) ($set['name'] ?? 'Paket');
+
         foreach ($set['items'] as $item) {
             $productId = (int) $item['product_id'];
             $qty = (int) $item['quantity'];
@@ -976,12 +1303,30 @@ final class SessionsController
                 continue;
             }
 
-            $this->stock->applyStockChange($productId, 'sale', $qty, 'sale', 'session', $sessionId, $userId);
+            $this->stock->applyStockChange(
+                $productId,
+                'sale',
+                $qty,
+                'sale',
+                'session',
+                $sessionId,
+                $userId,
+                sprintf('%s: paket "%s" — %s −%d (sessiya #%d)', $actor, $setName, $product['name'], $qty, $sessionId)
+            );
             $this->pdo->prepare(
                 'INSERT INTO session_items (session_id, product_id, product_name, quantity, unit_price, is_set_item, created_at)
                  VALUES (?, ?, ?, ?, 0, 1, NOW())'
             )->execute([$sessionId, $productId, $product['name'], $qty]);
         }
+    }
+
+    /** @param array<string, mixed> $bill */
+    private function isVoidSession(array $bill, int $itemCount): bool
+    {
+        return $itemCount === 0
+            && round((float) $bill['time_charge'], 2) <= 0
+            && round((float) $bill['products_total'], 2) <= 0
+            && round((float) $bill['total_amount'], 2) <= 0;
     }
 
     /**

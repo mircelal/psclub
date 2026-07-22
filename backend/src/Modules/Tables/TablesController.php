@@ -9,6 +9,7 @@ use App\Support\BillingCalculator;
 use App\Support\BusinessBillingColumns;
 use App\Support\DatabaseClock;
 use App\Support\DiscountCalculator;
+use App\Support\LoyaltyService;
 use App\Support\PromotionService;
 use PDO;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -22,6 +23,7 @@ final class TablesController
         private readonly BillingCalculator $billing,
         private readonly DatabaseClock $clock,
         private readonly PromotionService $promotions,
+        private readonly ?LoyaltyService $loyalty = null,
     ) {
     }
 
@@ -39,9 +41,12 @@ final class TablesController
                     s.discount_value AS session_discount_value,
                     s.discount_applies_to AS session_discount_applies_to,
                     s.customer_id AS session_customer_id,
-                    s.session_type AS session_type
+                    s.session_type AS session_type,
+                    c.bonus_minutes AS customer_bonus_minutes,
+                    c.bonus_wallet AS customer_bonus_wallet
              FROM tables t
              LEFT JOIN sessions s ON s.table_id = t.id AND s.status IN (\'active\', \'paused\')
+             LEFT JOIN customers c ON c.id = s.customer_id
              WHERE t.is_active = 1
              ORDER BY t.sort_order, t.id'
         );
@@ -116,6 +121,9 @@ final class TablesController
         $plannedMinutes = isset($tableRow['planned_minutes']) ? (int) $tableRow['planned_minutes'] : 0;
 
         $setPrice = (float) ($tableRow['session_set_price'] ?? 0);
+        if ($setPrice <= 0 && $plannedMinutes > 0) {
+            $activeSeconds = $this->billing->capActiveSecondsForPlanned($activeSeconds, $plannedMinutes);
+        }
         if ($setPrice > 0) {
             $timeCharge = round($setPrice, 2);
             $productsTotal = $this->billing->calculateProductsTotal($items, true);
@@ -142,17 +150,24 @@ final class TablesController
             'session_type' => $tableRow['session_type'] ?? 'table',
             'tariff_name_snapshot' => $tableRow['session_tariff_name'] ?? null,
             'customer_id' => $tableRow['session_customer_id'] ?? null,
+            'customer_bonus_minutes' => (int) ($tableRow['customer_bonus_minutes'] ?? 0),
+            'customer_bonus_wallet' => (float) ($tableRow['customer_bonus_wallet'] ?? 0),
             'discount_type' => $tableRow['session_discount_type'] ?? 'none',
             'discount_value' => $tableRow['session_discount_value'] ?? 0,
             'discount_applies_to' => $tableRow['session_discount_applies_to'] ?? 'time_only',
+            'hourly_rate_snapshot' => (float) ($tableRow['session_hourly_rate'] ?? 0),
+            'set_price_snapshot' => (float) ($tableRow['session_set_price'] ?? 0),
+            'planned_minutes' => (int) ($tableRow['planned_minutes'] ?? 0),
             'business_id' => 1,
         ];
         $discountType = $sessionRow['discount_type'] ?? 'none';
         $discountAppliesTo = $sessionRow['discount_applies_to'] ?? 'time_only';
-        $resolved = $this->promotions->resolveDiscount($sessionRow, $timeCharge, $productsTotal);
+        $resolved = $this->promotions->resolveDiscount($sessionRow, $timeCharge, $productsTotal, 0.0, $items);
         $discount = $resolved['amount'];
         $promotion = $resolved['promotion'];
         $customerGroup = $resolved['customer_group'];
+        $productDiscount = (float) ($resolved['product_discount'] ?? 0);
+        $activeProductPromotions = $resolved['active_product_promotions'] ?? [];
         $displayCustomerGroup = $this->promotions->displayCustomerGroup($sessionRow);
         $promotionName = $promotion['name'] ?? null;
         $discountLabel = $promotionName;
@@ -163,10 +178,15 @@ final class TablesController
             $promotion = null;
             $customerGroup = null;
             $discountLabel = null;
+            $productDiscount = 0.0;
+            $activeProductPromotions = [];
         } elseif ($customerGroup !== null) {
             $discountLabel = (string) $customerGroup['name'];
             $promotionName = null;
             $promotion = null;
+        }
+        if ($discountLabel === null && $activeProductPromotions !== []) {
+            $discountLabel = (string) ($activeProductPromotions[0]['name'] ?? 'Məhsul endirimi');
         }
         $total = round($subtotal - $discount, 2);
         $hasPackage = $setPrice > 0;
@@ -175,6 +195,27 @@ final class TablesController
             'product_name' => $i['product_name'],
             'quantity' => (int) $i['quantity'],
         ], $items);
+
+        $billPreview = [
+            'active_seconds' => $activeSeconds,
+            'active_minutes' => (int) ceil($activeSeconds / 60),
+            'time_charge' => $timeCharge,
+            'products_total' => $productsTotal,
+            'subtotal' => $subtotal,
+            'discount' => $discount,
+            'discount_applies_to' => $discountAppliesTo,
+            'total_amount' => $total,
+            'items' => $items,
+        ];
+        $loyaltyPreview = null;
+        $customerBonusMinutes = 0;
+        $customerBonusWallet = 0.0;
+        if ($this->loyalty !== null) {
+            $loyalty = $this->loyalty->previewMaxBonus($billPreview, $sessionRow);
+            $loyaltyPreview = $loyalty['loyalty_preview'];
+            $customerBonusMinutes = $loyalty['customer_bonus_minutes'];
+            $customerBonusWallet = $loyalty['customer_bonus_wallet'];
+        }
 
         return [
             'active_seconds' => $activeSeconds,
@@ -193,6 +234,8 @@ final class TablesController
                 'discount_type' => (string) $promotion['discount_type'],
                 'discount_value' => (float) $promotion['discount_value'],
             ] : null,
+            'product_discount' => $productDiscount,
+            'active_product_promotions' => $activeProductPromotions,
             'customer_group_name' => $customerGroup ? (string) $customerGroup['name'] : null,
             'customer_group_discount_type' => $customerGroup ? (string) $customerGroup['discount_type'] : null,
             'customer_group_discount_value' => $customerGroup ? (float) $customerGroup['discount_value'] : null,
@@ -205,6 +248,9 @@ final class TablesController
             'is_package' => $hasPackage,
             'computed_at' => $this->clock->nowIso(),
             'items' => $itemRows,
+            'customer_bonus_minutes' => $customerBonusMinutes,
+            'customer_bonus_wallet' => $customerBonusWallet,
+            'loyalty_preview' => $loyaltyPreview,
         ];
     }
 
@@ -357,7 +403,7 @@ final class TablesController
         $this->pdo->exec(
             "UPDATE sessions
              SET status = 'closed', closed_at = NOW(), time_charge = 0, products_total = 0,
-                 total_amount = 0, active_seconds = 0, updated_at = NOW()
+                 total_amount = 0, active_seconds = 0, order_state = 'deleted', updated_at = NOW()
              WHERE status IN ('active', 'paused')
                AND table_id IS NULL
                AND opened_at < DATE_SUB(NOW(), INTERVAL 30 MINUTE)

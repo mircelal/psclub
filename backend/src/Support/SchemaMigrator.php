@@ -145,6 +145,13 @@ final class SchemaMigrator
             $tablesApiError = $e->getMessage();
         }
 
+        $loyaltyOk = self::columnExists($pdo, 'customers', 'bonus_minutes')
+            && self::columnExists($pdo, 'customers', 'bonus_wallet')
+            && in_array('loyalty_tiers', $tables, true)
+            && in_array('loyalty_ledger', $tables, true)
+            && self::columnExists($pdo, 'sessions', 'bonus_minutes_used')
+            && self::columnExists($pdo, 'sessions', 'bonus_wallet_used');
+
         return [
             'db_tables_count' => count($tables),
             'billing_columns_missing' => $missing,
@@ -156,6 +163,7 @@ final class SchemaMigrator
             'discounts_schema_ok' => in_array('promotions', $tables, true)
                 && in_array('customer_groups', $tables, true)
                 && self::columnExists($pdo, 'customers', 'customer_group_id'),
+            'loyalty_schema_ok' => $loyaltyOk,
             'public_config_query_ok' => $publicConfigOk,
             'public_config_error' => $publicConfigError,
             'tables_query_ok' => $tablesApiOk,
@@ -172,6 +180,33 @@ final class SchemaMigrator
         $stmt->execute([$table, $column]);
 
         return (bool) $stmt->fetchColumn();
+    }
+
+    /** Admin sifariş silməsi üçün order_state = deleted və audit sütunları. */
+    public static function ensureOrderDeletedState(PDO $pdo): void
+    {
+        if (!self::columnExists($pdo, 'sessions', 'order_state')) {
+            return;
+        }
+
+        $enumRow = $pdo->query(
+            "SELECT COLUMN_TYPE FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sessions' AND COLUMN_NAME = 'order_state'"
+        )->fetch(PDO::FETCH_ASSOC);
+        $enumType = (string) ($enumRow['COLUMN_TYPE'] ?? '');
+        if (!str_contains($enumType, 'deleted')) {
+            $pdo->exec(
+                "ALTER TABLE sessions MODIFY COLUMN order_state
+                 ENUM('paid', 'refunded', 'adjusted', 'deleted') NOT NULL DEFAULT 'paid'"
+            );
+        }
+
+        if (!self::columnExists($pdo, 'sessions', 'deleted_by')) {
+            $pdo->exec('ALTER TABLE sessions ADD COLUMN deleted_by INT UNSIGNED NULL AFTER adjusted_at');
+        }
+        if (!self::columnExists($pdo, 'sessions', 'deleted_at')) {
+            $pdo->exec('ALTER TABLE sessions ADD COLUMN deleted_at DATETIME NULL AFTER deleted_by');
+        }
     }
 
     private static function recordPhinxMigration(PDO $pdo, string $version, string $migrationName = 'AddBillingTimingRules'): void
@@ -235,12 +270,27 @@ final class SchemaMigrator
         $parts = preg_split('/;\s*\n/', $sql) ?: [];
         $out = [];
         foreach ($parts as $part) {
-            $part = trim($part);
-            if ($part !== '' && !str_starts_with($part, '--')) {
-                $out[] = $part;
+            $statement = self::stripLeadingSqlComments(trim($part));
+            if ($statement !== '') {
+                $out[] = $statement;
             }
         }
 
         return $out;
+    }
+
+    private static function stripLeadingSqlComments(string $sql): string
+    {
+        $lines = preg_split('/\R/', $sql) ?: [];
+        $sqlLines = [];
+        foreach ($lines as $line) {
+            $trimmed = ltrim($line);
+            if ($trimmed === '' || str_starts_with($trimmed, '--')) {
+                continue;
+            }
+            $sqlLines[] = $line;
+        }
+
+        return trim(implode("\n", $sqlLines));
     }
 }

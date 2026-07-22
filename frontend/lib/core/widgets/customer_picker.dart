@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
+import '../utils/json_parse.dart';
 import '../utils/phone_utils.dart';
 import '../widgets/app_dialog.dart';
 import 'phone_text_field.dart';
@@ -14,12 +15,14 @@ class CustomerPicker extends StatefulWidget {
     this.selectedId,
     this.onChanged,
     this.onCustomerDetailChanged,
+    this.compact = false,
   });
 
   final PosService pos;
   final int? selectedId;
   final ValueChanged<int?>? onChanged;
   final ValueChanged<Map<String, dynamic>?>? onCustomerDetailChanged;
+  final bool compact;
 
   @override
   State<CustomerPicker> createState() => _CustomerPickerState();
@@ -52,20 +55,24 @@ class _CustomerPickerState extends State<CustomerPicker> {
       Map<String, dynamic>? found;
       for (final raw in list) {
         final c = raw as Map<String, dynamic>;
-        if (c['id'] == id) {
+        if (jsonToInt(c['id']) == id) {
           found = c;
           break;
         }
       }
-      if (found != null && mounted) {
-        setState(() => _selected = found);
-        _notifySelection(found);
+      final selected = found;
+      if (selected != null && mounted) {
+        setState(() {
+          _selected = selected;
+          if (widget.compact) _queryCtrl.text = selected['name'] as String? ?? '';
+        });
+        _notifySelection(selected);
       }
     } catch (_) {}
   }
 
   void _notifySelection(Map<String, dynamic>? customer) {
-    widget.onChanged?.call(customer != null ? customer['id'] as int? : null);
+    widget.onChanged?.call(customer != null ? jsonToIntOrNull(customer['id']) : null);
     widget.onCustomerDetailChanged?.call(customer);
   }
 
@@ -134,7 +141,7 @@ class _CustomerPickerState extends State<CustomerPicker> {
       setState(() {
         _selected = created;
         _expanded = false;
-        _queryCtrl.clear();
+        _queryCtrl.text = widget.compact ? (created['name'] as String? ?? '') : '';
       });
       _notifySelection(created);
     }
@@ -193,12 +200,14 @@ class _CustomerPickerState extends State<CustomerPicker> {
             ),
           ],
         ),
-        if (_selected != null && !_expanded)
+        if (_selected != null && !_expanded && !widget.compact)
           Padding(
             padding: const EdgeInsets.only(top: 8),
             child: _CustomerChip(
               name: _selected!['name'] as String? ?? '',
               phone: _selected!['phone'] as String? ?? '',
+              bonusMinutes: jsonToInt(_selected!['bonus_minutes']),
+              bonusWallet: jsonToDouble(_selected!['bonus_wallet']),
             ),
           ),
         if (_expanded) ...[
@@ -226,6 +235,10 @@ class _CustomerPickerState extends State<CustomerPicker> {
                             c['phone'] as String? ?? '',
                             if ((c['customer_group_name'] as String?)?.isNotEmpty == true)
                               c['customer_group_name'] as String,
+                            if (jsonToInt(c['bonus_minutes']) > 0)
+                              '${(jsonToInt(c['bonus_minutes']) / 60).toStringAsFixed(1)} saat bonus',
+                            if (jsonToDouble(c['bonus_wallet']) > 0)
+                              '${jsonToDouble(c['bonus_wallet']).toStringAsFixed(2)} ₼ bonus',
                           ].where((e) => e.isNotEmpty).join(' · ')),
                           onTap: () {
                             setState(() {
@@ -255,13 +268,24 @@ class _CustomerPickerState extends State<CustomerPicker> {
 }
 
 class _CustomerChip extends StatelessWidget {
-  const _CustomerChip({required this.name, required this.phone});
+  const _CustomerChip({
+    required this.name,
+    required this.phone,
+    this.bonusMinutes = 0,
+    this.bonusWallet = 0,
+  });
 
   final String name;
   final String phone;
+  final int bonusMinutes;
+  final double bonusWallet;
 
   @override
   Widget build(BuildContext context) {
+    final bonusParts = <String>[];
+    if (bonusMinutes > 0) bonusParts.add('${(bonusMinutes / 60).toStringAsFixed(1)} saat bonus');
+    if (bonusWallet > 0) bonusParts.add('${bonusWallet.toStringAsFixed(2)} ₼ bonus');
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
@@ -279,6 +303,11 @@ class _CustomerChip extends StatelessWidget {
               children: [
                 Text(name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
                 Text(phone, style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                if (bonusParts.isNotEmpty)
+                  Text(
+                    bonusParts.join(' · '),
+                    style: const TextStyle(fontSize: 11, color: AppColors.success, fontWeight: FontWeight.w500),
+                  ),
               ],
             ),
           ),

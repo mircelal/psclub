@@ -28,6 +28,10 @@ $files = @(
     'backend\src\Modules\Customers\CustomerGroupsController.php',
     'backend\src\Modules\Customers\CustomersController.php',
     'backend\src\Modules\Promotions\PromotionsController.php',
+    'backend\src\Support\LoyaltyService.php',
+    'backend\src\Modules\Loyalty\LoyaltyController.php',
+    'backend\database\patches\20260609120000_stock_movement_audit.sql',
+    'backend\database\patches\20260620120000_loyalty_program.sql',
     'backend\database\patches\20260517120000_billing_timing_rules.sql',
     'backend\database\patches\20260522120000_billing_grace_minutes.sql',
     'backend\database\patches\20260521120000_cash_movement_refund_type.sql',
@@ -68,7 +72,7 @@ PS Club — server hotfix (kod + DB patch)
    https://psapi.sayt.cam/server-setup.php?action=status
    https://psapi.sayt.cam/server-setup.php?action=migrate&key=uzun-gizli-acar
 
-4) status "ok": true və discounts_schema_ok: true olmalıdır.
+4) status "ok": true, discounts_schema_ok və loyalty_schema_ok: true olmalıdır.
 
 5) Uğurdan sonra public_html-dən SİLİN:
    server-setup.php, run-migrate.php

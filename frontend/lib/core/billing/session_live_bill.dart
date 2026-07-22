@@ -83,13 +83,13 @@ SessionBillSnapshot computeSessionLiveBill(
     if (opened != null) {
       activeSeconds = _activeSeconds(opened.toUtc(), end, pauses, isPaused);
     }
-    if (plannedMinutes != null && plannedMinutes > 0) {
-      activeSeconds = activeSeconds.clamp(0, plannedMinutes * 60);
-    }
   }
 
   final isCounter = (session['session_type'] ?? 'table') == 'counter';
   final setPrice = jsonToDouble(session['set_price_snapshot']);
+  if (setPrice <= 0 && plannedMinutes != null && plannedMinutes > 0) {
+    activeSeconds = BillingCalculator.capActiveSecondsForPlanned(activeSeconds, plannedMinutes);
+  }
   final double timeCharge;
   if (isCounter) {
     timeCharge = 0.0;
@@ -219,6 +219,30 @@ double _discountForSource(
   return _computeDiscount(base, type, value, 0);
 }
 
+double readProductDiscount(Map<String, dynamic> session) {
+  final bill = session['bill_preview'];
+  if (bill is Map) {
+    final fromBill = jsonToDouble(bill['product_discount']);
+    if (fromBill > 0) return fromBill;
+  }
+  return jsonToDouble(session['product_discount']);
+}
+
+/// Sessiya sətiri id → məhsul endirimi məbləği (server bill_preview).
+Map<int, double> readItemDiscounts(Map<String, dynamic> session) {
+  final out = <int, double>{};
+  final raw = session['bill_preview'] is Map
+      ? (session['bill_preview'] as Map)['item_discounts']
+      : session['item_discounts'];
+  if (raw is! Map) return out;
+  raw.forEach((key, value) {
+    final id = jsonToInt(key);
+    final amount = jsonToDouble(value);
+    if (id > 0 && amount > 0) out[id] = amount;
+  });
+  return out;
+}
+
 SessionDiscountSnapshot resolveSessionDiscount({
   required double timeCharge,
   required double productsTotal,
@@ -238,22 +262,37 @@ SessionDiscountSnapshot resolveSessionDiscount({
     final group = readActiveCustomerGroup(session);
     final promo = readActivePromotion(session);
     final groupAmount = group != null ? _discountForSource(group, timeCharge: timeCharge, subtotal: subtotal) : 0.0;
-    final promoAmount = promo != null ? _discountForSource({...promo, 'applies_to': 'time_only'}, timeCharge: timeCharge, subtotal: subtotal) : 0.0;
+    final promoAmount = promo != null
+        ? _discountForSource({...promo, 'applies_to': 'time_only'}, timeCharge: timeCharge, subtotal: subtotal)
+        : 0.0;
+    final productDiscount = readProductDiscount(session);
 
+    double timeOrGroup = 0;
     if (group != null && groupAmount >= promoAmount && groupAmount > 0) {
-      discount = groupAmount;
+      timeOrGroup = groupAmount;
       promotionName = group['name'] as String?;
     } else if (promo != null && promoAmount > 0) {
-      discount = promoAmount;
+      timeOrGroup = promoAmount;
       promotionName = promo['name'] as String?;
-    } else {
+    }
+
+    discount = timeOrGroup + productDiscount;
+    if (discount <= 0) {
       discount = jsonToDouble(session['discount']);
       if (discount <= 0 && session['bill_preview'] is Map) {
         final bill = session['bill_preview'] as Map;
         discount = jsonToDouble(bill['discount']);
-        promotionName = bill['customer_group_name'] as String? ?? bill['promotion_name'] as String? ?? bill['discount_label'] as String?;
+        promotionName ??= bill['customer_group_name'] as String? ??
+            bill['promotion_name'] as String? ??
+            bill['discount_label'] as String?;
+      }
+    } else if (promotionName == null && productDiscount > 0 && session['bill_preview'] is Map) {
+      final promos = (session['bill_preview'] as Map)['active_product_promotions'];
+      if (promos is List && promos.isNotEmpty && promos.first is Map) {
+        promotionName = (promos.first as Map)['name'] as String?;
       }
     }
+    if (discount > subtotal) discount = subtotal;
   }
 
   return SessionDiscountSnapshot(
@@ -284,4 +323,37 @@ int _activeSeconds(DateTime opened, DateTime end, List<dynamic> pauses, bool isP
   }
 
   return (total - paused).clamp(0, 999999);
+}
+
+/// API `bill_preview` ümumi məbləği (bonus öncəsi).
+double billGrossTotal(Map<String, dynamic> billMap) => jsonToDouble(billMap['total_amount']);
+
+/// Müştəri bonusu tətbiq olunmuş ödəniləcək məbləğ.
+double billPayableTotal(Map<String, dynamic> billMap, [double? fallback]) {
+  final loyalty = billMap['loyalty_preview'] as Map<String, dynamic>?;
+  if (loyalty != null) {
+    return jsonToDouble(loyalty['total_after_bonus'], fallback ?? billGrossTotal(billMap));
+  }
+  return fallback ?? billGrossTotal(billMap);
+}
+
+/// Loyallıq endirimi (₼); yoxdursa null.
+double? billLoyaltyCredit(Map<String, dynamic> billMap) {
+  final loyalty = billMap['loyalty_preview'] as Map<String, dynamic>?;
+  if (loyalty == null) return null;
+  final credit = jsonToDouble(loyalty['loyalty_credit']);
+  return credit > 0 ? credit : null;
+}
+
+/// Canlı hesablanmış ümumi + server loyalty preview uyğunlaşdırması.
+double adjustTotalForLoyalty(Map<String, dynamic>? billMap, double grossTotal) {
+  if (billMap == null) return grossTotal;
+  final loyalty = billMap['loyalty_preview'] as Map<String, dynamic>?;
+  if (loyalty == null) return grossTotal;
+  final previewGross = billGrossTotal(billMap);
+  final previewNet = billPayableTotal(billMap);
+  final credit = jsonToDouble(loyalty['loyalty_credit']);
+  if (credit <= 0) return grossTotal;
+  if ((grossTotal - previewGross).abs() < 0.02) return previewNet;
+  return (grossTotal - credit).clamp(0.0, grossTotal);
 }

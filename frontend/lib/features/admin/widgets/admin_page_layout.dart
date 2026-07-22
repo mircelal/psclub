@@ -10,6 +10,7 @@ class AdminPageLayout extends StatelessWidget {
     this.title,
     this.subtitle,
     this.action,
+    this.leading,
     required this.child,
     this.showInlineHeader = false,
   });
@@ -17,6 +18,7 @@ class AdminPageLayout extends StatelessWidget {
   final String? title;
   final String? subtitle;
   final Widget? action;
+  final Widget? leading;
   final Widget child;
   final bool showInlineHeader;
 
@@ -61,6 +63,7 @@ class AdminPageLayout extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
+                if (leading != null) ...[leading!, const SizedBox(width: AppSpacing.sm)],
                 if (subtitle != null)
                   Expanded(
                     child: Text(subtitle!, style: CashierTheme.caption(context)),

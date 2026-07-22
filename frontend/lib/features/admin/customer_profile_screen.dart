@@ -32,6 +32,7 @@ class _CustomerProfileScreenState extends ConsumerState<CustomerProfileScreen> {
   bool _loading = true;
   Map<String, dynamic>? _customer;
   Map<String, dynamic>? _stats;
+  Map<String, dynamic>? _loyalty;
   List<Map<String, dynamic>> _sessions = [];
   String? _error;
 
@@ -52,11 +53,13 @@ class _CustomerProfileScreenState extends ConsumerState<CustomerProfileScreen> {
       final data = await ref.read(posServiceProvider).getCustomerProfile(widget.customerId);
       _customer = data['customer'] as Map<String, dynamic>?;
       _stats = data['stats'] as Map<String, dynamic>?;
+      _loyalty = data['loyalty'] as Map<String, dynamic>?;
       _sessions = (data['sessions'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
     } catch (e) {
       _error = e.toString();
       _customer = null;
       _stats = null;
+      _loyalty = null;
       _sessions = [];
     }
     if (mounted) setState(() => _loading = false);
@@ -144,6 +147,77 @@ class _CustomerProfileScreenState extends ConsumerState<CustomerProfileScreen> {
     }
   }
 
+  Future<void> _grantBonus() async {
+    var kind = 'hours';
+    final valueCtrl = TextEditingController();
+    final noteCtrl = TextEditingController();
+
+    final ok = await showAppDialog<bool>(
+      context: context,
+      title: 'Bonus əlavə et',
+      icon: Icons.card_giftcard_outlined,
+      maxWidth: 440,
+      body: StatefulBuilder(
+        builder: (context, setDialogState) {
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SegmentedButton<String>(
+                segments: const [
+                  ButtonSegment(value: 'hours', label: Text('Saat balansı')),
+                  ButtonSegment(value: 'wallet', label: Text('Endirim balansı')),
+                ],
+                selected: {kind},
+                onSelectionChanged: (s) => setDialogState(() => kind = s.first),
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              AppTextField(
+                controller: valueCtrl,
+                label: kind == 'hours' ? 'Dəqiqə' : 'Məbləğ (₼)',
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              AppTextField(controller: noteCtrl, label: 'Qeyd (istəyə bağlı)'),
+            ],
+          );
+        },
+      ),
+      actions: [
+        OutlinedButton(onPressed: () => Navigator.pop(context, false), child: const Text('Ləğv')),
+        FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Əlavə et')),
+      ],
+    );
+
+    if (ok != true) {
+      valueCtrl.dispose();
+      noteCtrl.dispose();
+      return;
+    }
+
+    final value = double.tryParse(valueCtrl.text.replaceAll(',', '.')) ?? 0;
+    final note = noteCtrl.text.trim();
+    valueCtrl.dispose();
+    noteCtrl.dispose();
+    if (value <= 0) {
+      if (mounted) showAppSnackBar(context, 'Məbləğ daxil edin', isError: true);
+      return;
+    }
+
+    try {
+      await ref.read(posServiceProvider).grantCustomerLoyalty(
+            widget.customerId,
+            kind: kind,
+            value: value,
+            note: note.isEmpty ? null : note,
+          );
+      await _load();
+      widget.onUpdated?.call();
+      if (mounted) showAppSnackBar(context, 'Bonus əlavə edildi');
+    } catch (e) {
+      if (mounted) showAppSnackBar(context, e.toString(), isError: true);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final customer = _customer;
@@ -192,6 +266,8 @@ class _CustomerProfileScreenState extends ConsumerState<CustomerProfileScreen> {
                           _ProfileHeader(customer: customer),
                           const SizedBox(height: AppSpacing.xl),
                           if (stats != null) _StatsGrid(stats: stats),
+                          const SizedBox(height: AppSpacing.xl),
+                          _LoyaltySection(loyalty: _loyalty, onGrant: _grantBonus),
                           const SizedBox(height: AppSpacing.xl),
                           Text('Sessiyalar və alışlar', style: Theme.of(context).textTheme.titleMedium),
                           const SizedBox(height: AppSpacing.md),
@@ -409,6 +485,127 @@ class _StatTile extends StatelessWidget {
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LoyaltySection extends StatelessWidget {
+  const _LoyaltySection({required this.loyalty, required this.onGrant});
+
+  final Map<String, dynamic>? loyalty;
+  final VoidCallback onGrant;
+
+  String _entryLabel(Map<String, dynamic> entry) {
+    final type = entry['entry_type'] as String? ?? '';
+    final minutes = jsonToInt(entry['minutes_delta']);
+    final wallet = jsonToDouble(entry['wallet_delta']);
+    return switch (type) {
+      'tier_earn' => 'Avtomatik: +${minutes > 0 ? '$minutes dəq' : '${wallet.toStringAsFixed(2)} ₼'}',
+      'admin_hours' => 'Admin: +$minutes dəq',
+      'admin_wallet' => 'Admin: +${wallet.toStringAsFixed(2)} ₼',
+      'redeem_hours' => 'İstifadə: $minutes dəq',
+      'redeem_wallet' => 'İstifadə: ${wallet.toStringAsFixed(2)} ₼',
+      _ => entry['note'] as String? ?? type,
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final balance = loyalty?['balance'] as Map<String, dynamic>? ?? {};
+    final ledger = (loyalty?['ledger'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+    final bonusMinutes = jsonToInt(balance['bonus_minutes']);
+    final bonusWallet = jsonToDouble(balance['bonus_wallet']);
+
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.xl),
+      decoration: CashierTheme.elevatedCardDecoration(context),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text('Loyallıq balansı', style: Theme.of(context).textTheme.titleMedium),
+              ),
+              FilledButton.tonalIcon(
+                onPressed: onGrant,
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Bonus yaz'),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          Row(
+            children: [
+              Expanded(
+                child: _LoyaltyBalanceTile(
+                  icon: Icons.schedule,
+                  label: 'Saat balansı',
+                  value: '${(bonusMinutes / 60).toStringAsFixed(1)} saat',
+                  subtitle: '$bonusMinutes dəq',
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: _LoyaltyBalanceTile(
+                  icon: Icons.account_balance_wallet_outlined,
+                  label: 'Endirim balansı',
+                  value: '${bonusWallet.toStringAsFixed(2)} ₼',
+                ),
+              ),
+            ],
+          ),
+          if (ledger.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.lg),
+            Text('Son əməliyyatlar', style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: AppSpacing.sm),
+            ...ledger.take(8).map(
+                  (e) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Text(
+                      _entryLabel(e),
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _LoyaltyBalanceTile extends StatelessWidget {
+  const _LoyaltyBalanceTile({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.subtitle,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final String? subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      decoration: BoxDecoration(
+        color: CashierTheme.accentSubtle(context),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 20, color: BrandColors.brightBlue),
+          const SizedBox(height: 8),
+          Text(label, style: Theme.of(context).textTheme.bodySmall),
+          Text(value, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
+          if (subtitle != null) Text(subtitle!, style: Theme.of(context).textTheme.bodySmall),
         ],
       ),
     );

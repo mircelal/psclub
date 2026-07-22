@@ -10,6 +10,7 @@ use App\Support\BillingCalculator;
 use App\Support\Database;
 use App\Support\DatabaseClock;
 use App\Support\CustomerGroupService;
+use App\Support\LoyaltyService;
 use App\Support\PromotionService;
 use DI\ContainerBuilder;
 use Monolog\Handler\StreamHandler;
@@ -44,6 +45,7 @@ $builder->addDefinitions([
         $c->get(PDO::class),
         $c->get(CustomerGroupService::class)
     ),
+    LoyaltyService::class => fn (\Psr\Container\ContainerInterface $c) => new LoyaltyService($c->get(PDO::class)),
 ]);
 
 return $builder->build();

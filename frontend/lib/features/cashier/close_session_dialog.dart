@@ -10,6 +10,7 @@ import '../../core/feedback/app_feedback.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_palette.dart';
 import '../../core/theme/app_spacing.dart';
+import '../../core/utils/json_parse.dart';
 import '../../core/widgets/app_dialog.dart';
 import '../../core/widgets/money_text.dart';
 import '../../services/pos_service.dart';
@@ -42,6 +43,13 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
   bool _loadingBill = true;
   Map<String, dynamic>? _receipt;
   SessionBillSnapshot? _bill;
+  int _customerBonusMinutes = 0;
+  double _customerBonusWallet = 0;
+  bool _useBonusMinutes = false;
+  bool _useBonusWallet = false;
+  double _loyaltyCredit = 0;
+  bool _hasCustomer = false;
+  bool _bonusDefaultsSet = false;
 
   @override
   void initState() {
@@ -54,8 +62,33 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
     setState(() => _loadingBill = true);
     try {
       final session = await ref.read(posServiceProvider).getSession(widget.sessionId);
+      final customerId = session['customer_id'];
+      _hasCustomer = jsonToInt(customerId) > 0;
+      _customerBonusMinutes = _hasCustomer ? jsonToInt(session['customer_bonus_minutes']) : 0;
+      _customerBonusWallet = _hasCustomer ? jsonToDouble(session['customer_bonus_wallet']) : 0;
+
+      if (!_bonusDefaultsSet && _hasCustomer) {
+        _useBonusMinutes = _customerBonusMinutes > 0;
+        _useBonusWallet = _customerBonusWallet > 0;
+        _bonusDefaultsSet = true;
+      } else if (_hasCustomer && _customerBonusMinutes <= 0 && _customerBonusWallet <= 0) {
+        _useBonusMinutes = false;
+        _useBonusWallet = false;
+      }
+
+      final redeemMinutes = _useBonusMinutes ? _customerBonusMinutes : 0;
+      final redeemWallet = _useBonusWallet ? _customerBonusWallet : 0.0;
+      final preview = await ref.read(posServiceProvider).previewBill(
+            widget.sessionId,
+            redeemBonusMinutes: redeemMinutes,
+            redeemBonusWallet: redeemWallet,
+          );
+
       final config = await ref.read(businessConfigProvider.future);
       final isCounter = widget.isCounter || (session['session_type'] ?? 'table') == 'counter';
+      if (isCounter) {
+        _useBonusMinutes = false;
+      }
       final live = computeSessionLiveBill(
         session,
         billingMode: config.chargeBillingMode,
@@ -64,11 +97,28 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
         billingIncrementMinutes: config.billingIncrementMinutes,
         billingGraceMinutes: config.billingGraceMinutes,
       );
+
       if (mounted) {
         setState(() {
-          _bill = live;
+          _bill = SessionBillSnapshot(
+            activeSeconds: live.activeSeconds,
+            activeMinutes: live.activeMinutes,
+            timeCharge: jsonToDouble(preview['time_charge'], live.timeCharge),
+            productsTotal: jsonToDouble(preview['products_total'], live.productsTotal),
+            discount: jsonToDouble(preview['discount'], live.discount),
+            subtotal: jsonToDouble(preview['subtotal'], live.subtotal),
+            totalAmount: jsonToDouble(preview['total_amount'], live.totalAmount),
+            plannedMinutes: live.plannedMinutes,
+            remainingSeconds: live.remainingSeconds,
+            isCountdown: live.isCountdown,
+            discountType: live.discountType,
+            discountValue: live.discountValue,
+            couponCode: live.couponCode,
+            promotionName: live.promotionName,
+          );
+          _loyaltyCredit = jsonToDouble(preview['loyalty_credit']);
           _loadingBill = false;
-          _cashCtrl.text = live.totalAmount.toStringAsFixed(2);
+          _cashCtrl.text = _bill!.totalAmount.toStringAsFixed(2);
           _cardCtrl.text = '0.00';
         });
       }
@@ -78,6 +128,12 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
       }
     }
+  }
+
+  Future<void> _toggleBonus({bool? minutes, bool? wallet}) async {
+    if (minutes != null) _useBonusMinutes = minutes;
+    if (wallet != null) _useBonusWallet = wallet;
+    await _loadBill();
   }
 
   void _syncMixed() {
@@ -98,6 +154,7 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
 
   Future<void> _applyManualDiscount() async {
     if (_bill == null) return;
+    final isCounter = widget.isCounter;
     final result = await showSessionDiscountDialog(
       context,
       timeCharge: _bill!.timeCharge,
@@ -107,6 +164,7 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
       discountValue: _bill!.discountValue,
       checkoutMode: true,
       currentTotal: _bill!.totalAmount,
+      isCounter: isCounter,
     );
     if (result == null || !mounted) return;
 
@@ -119,7 +177,7 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
               widget.sessionId,
               discountType: result.discountType!,
               discountValue: result.discountValue ?? 0,
-              discountAppliesTo: 'time_only',
+              discountAppliesTo: isCounter ? 'all' : 'time_only',
             );
       }
       await _loadBill();
@@ -142,6 +200,8 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
             method: _method,
             cashAmount: cash,
             cardAmount: card,
+            redeemBonusMinutes: _useBonusMinutes ? _customerBonusMinutes : 0,
+            redeemBonusWallet: _useBonusWallet ? _customerBonusWallet : 0,
           );
       refreshCurrentShift(ref);
       setState(() {
@@ -296,6 +356,7 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
                               discount: bill.discount,
                               promotionName: bill.promotionName,
                               total: bill.totalAmount,
+                              loyaltyCredit: _loyaltyCredit > 0 ? _loyaltyCredit : null,
                               activeMinutes: bill.activeMinutes,
                               timeLabel: config.timeBillingEnabled
                                   ? '${config.labels.rateLabel} (${bill.activeMinutes} dəq)'
@@ -308,6 +369,38 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
                               icon: const Icon(Icons.local_offer_outlined),
                               label: const Text('Əl ilə endirim'),
                             ),
+                          ],
+                          if (_hasCustomer && (_customerBonusMinutes > 0 || _customerBonusWallet > 0)) ...[
+                            const SizedBox(height: AppSpacing.xl),
+                            Text('Loyallıq bonusu', style: Theme.of(context).textTheme.titleMedium),
+                            const SizedBox(height: AppSpacing.sm),
+                            if (_customerBonusMinutes > 0 && !widget.isCounter)
+                              SwitchListTile(
+                                contentPadding: EdgeInsets.zero,
+                                title: Text('Saat balansı (${(_customerBonusMinutes / 60).toStringAsFixed(1)} saat)'),
+                                subtitle: const Text('Vaxt haqqından çıxılır'),
+                                value: _useBonusMinutes,
+                                onChanged: _loading || _loadingBill
+                                    ? null
+                                    : (v) => _toggleBonus(minutes: v),
+                              ),
+                            if (_customerBonusWallet > 0)
+                              SwitchListTile(
+                                contentPadding: EdgeInsets.zero,
+                                title: Text('Endirim balansı (${_customerBonusWallet.toStringAsFixed(2)} ₼)'),
+                                value: _useBonusWallet,
+                                onChanged: _loading || _loadingBill
+                                    ? null
+                                    : (v) => _toggleBonus(wallet: v),
+                              ),
+                            if (_loyaltyCredit > 0)
+                              Padding(
+                                padding: const EdgeInsets.only(top: AppSpacing.sm),
+                                child: Text(
+                                  'Bonus endirimi: -${_loyaltyCredit.toStringAsFixed(2)} ₼',
+                                  style: TextStyle(color: AppColors.success, fontWeight: FontWeight.w600),
+                                ),
+                              ),
                           ],
                           const SizedBox(height: AppSpacing.xl),
                           Container(

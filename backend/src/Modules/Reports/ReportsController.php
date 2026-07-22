@@ -63,11 +63,26 @@ final class ReportsController
         );
         $products->execute([$date]);
 
+        $expenses = $this->pdo->prepare(
+            "SELECT description, category, COALESCE(SUM(amount), 0) AS total
+             FROM cash_movements
+             WHERE type = 'expense' AND DATE(created_at) = ?
+             GROUP BY description, category ORDER BY total DESC"
+        );
+        $expenses->execute([$date]);
+
+        $expenseTotal = $this->pdo->prepare(
+            "SELECT COALESCE(SUM(amount), 0) AS total FROM cash_movements WHERE type = 'expense' AND DATE(created_at) = ?"
+        );
+        $expenseTotal->execute([$date]);
+        $summary['expenses_total'] = (float) ($expenseTotal->fetch()['total'] ?? 0);
+
         return [
             'date' => $date,
             'summary' => $summary,
             'payments' => $payments->fetchAll(),
             'product_breakdown' => $products->fetchAll(),
+            'expenses' => $expenses->fetchAll(),
         ];
     }
 

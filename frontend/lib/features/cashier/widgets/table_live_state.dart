@@ -42,6 +42,8 @@ class TableLiveSnapshot {
 
     this.promotionName,
 
+    this.loyaltyCredit,
+
   });
 
 
@@ -59,6 +61,8 @@ class TableLiveSnapshot {
   final double discount;
 
   final String? promotionName;
+
+  final double? loyaltyCredit;
 
 }
 
@@ -98,7 +102,10 @@ double tableLiveBillTotal(
 
   );
 
-  if (snap != null) return snap.bill.totalAmount;
+  if (snap != null) {
+    final billMap = table['bill_preview'] as Map<String, dynamic>?;
+    return adjustTotalForLoyalty(billMap, snap.bill.totalAmount);
+  }
 
 
 
@@ -106,7 +113,7 @@ double tableLiveBillTotal(
 
   if (preview == null) return 0;
 
-  return jsonToDouble(preview['total_amount']);
+  return adjustTotalForLoyalty(preview, jsonToDouble(preview['total_amount']));
 
 }
 
@@ -160,7 +167,7 @@ TableLiveSnapshot? computeTableLive(
 
           totalAmount: jsonToDouble(billMap['total_amount']),
 
-          plannedMinutes: jsonToIntOrNull(billMap['planned_minutes']),
+          plannedMinutes: jsonToIntOrNull(billMap['planned_minutes']) ?? jsonToIntOrNull(table['planned_minutes']),
 
           remainingSeconds: jsonToIntOrNull(billMap['remaining_seconds']),
 
@@ -212,7 +219,7 @@ TableLiveSnapshot? computeTableLive(
 
 
 
-    return _withDiscount(
+    return _finalizeSnapshot(
 
       table,
 
@@ -240,11 +247,19 @@ TableLiveSnapshot? computeTableLive(
 
     final rate = jsonToDouble(table['session_hourly_rate'] ?? table['hourly_rate']);
 
+    var pausedActiveSeconds = base.activeSeconds;
+    if (base.plannedMinutes != null && base.plannedMinutes! > 0) {
+      pausedActiveSeconds = BillingCalculator.capActiveSecondsForPlanned(
+        pausedActiveSeconds,
+        base.plannedMinutes,
+      );
+    }
+
     final pausedCharge = timeBillingEnabled
 
         ? BillingCalculator.calculateTimeCharge(
 
-            activeSeconds: base.activeSeconds,
+            activeSeconds: pausedActiveSeconds,
 
             hourlyRate: rate,
 
@@ -254,6 +269,8 @@ TableLiveSnapshot? computeTableLive(
 
             billingIncrementMinutes: billingIncrementMinutes,
 
+            billingGraceMinutes: billingGraceMinutes,
+
             plannedMinutes: base.plannedMinutes,
 
           )
@@ -262,7 +279,7 @@ TableLiveSnapshot? computeTableLive(
 
     final pausedBill = BillingPreview(
 
-      activeSeconds: base.activeSeconds,
+      activeSeconds: pausedActiveSeconds,
 
       timeCharge: pausedCharge,
 
@@ -278,7 +295,7 @@ TableLiveSnapshot? computeTableLive(
 
     final expired = pausedBill.isCountdown && (pausedBill.remainingSeconds ?? 1) <= 0;
 
-    return _withDiscount(
+    return _finalizeSnapshot(
 
       table,
 
@@ -370,11 +387,71 @@ TableLiveSnapshot? computeTableLive(
 
 
 
-  return _withDiscount(
+  return _finalizeSnapshot(
 
     table,
 
     TableLiveSnapshot(bill: bill, items: items, isExpired: expired, isUrgent: urgent),
+
+  );
+
+}
+
+
+
+TableLiveSnapshot _finalizeSnapshot(Map<String, dynamic> table, TableLiveSnapshot snapshot) {
+
+  final withDiscount = _withDiscount(table, snapshot);
+
+  final billMap = table['bill_preview'] as Map<String, dynamic>?;
+
+  final credit = billMap != null ? billLoyaltyCredit(billMap) : null;
+
+  if (credit == null) return withDiscount;
+
+
+
+  final payable = adjustTotalForLoyalty(billMap, withDiscount.bill.totalAmount);
+
+  if ((payable - withDiscount.bill.totalAmount).abs() < 0.001) return withDiscount;
+
+
+
+  final adjustedBill = BillingPreview(
+
+    activeSeconds: withDiscount.bill.activeSeconds,
+
+    timeCharge: withDiscount.bill.timeCharge,
+
+    productsTotal: withDiscount.bill.productsTotal,
+
+    totalAmount: payable,
+
+    plannedMinutes: withDiscount.bill.plannedMinutes,
+
+    remainingSeconds: withDiscount.bill.remainingSeconds,
+
+  );
+
+
+
+  return TableLiveSnapshot(
+
+    bill: adjustedBill,
+
+    items: withDiscount.items,
+
+    isExpired: withDiscount.isExpired,
+
+    isUrgent: withDiscount.isUrgent,
+
+    isPackage: withDiscount.isPackage,
+
+    discount: withDiscount.discount,
+
+    promotionName: withDiscount.promotionName,
+
+    loyaltyCredit: credit,
 
   );
 
@@ -433,6 +510,8 @@ TableLiveSnapshot _withDiscount(Map<String, dynamic> table, TableLiveSnapshot sn
     discount: resolved.discount,
 
     promotionName: resolved.promotionName,
+
+    loyaltyCredit: snapshot.loyaltyCredit,
 
   );
 
