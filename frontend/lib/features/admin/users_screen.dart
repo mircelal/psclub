@@ -78,10 +78,21 @@ class _UsersScreenState extends ConsumerState<UsersScreen> {
     );
     if (ok != true || !mounted) return;
 
+    final username = userCtrl.text.trim();
+    final password = passCtrl.text;
+    if (username.isEmpty) {
+      showAppSnackBar(context, 'İstifadəçi adı tələb olunur', isError: true);
+      return;
+    }
+    if (password.length < 4) {
+      showAppSnackBar(context, 'Şifrə ən azı 4 simvol olmalıdır', isError: true);
+      return;
+    }
+
     try {
       await ref.read(posServiceProvider).createUser({
-        'username': userCtrl.text.trim(),
-        'password': passCtrl.text,
+        'username': username,
+        'password': password,
         'role': role,
         if (nameCtrl.text.trim().isNotEmpty) 'full_name': nameCtrl.text.trim(),
       });

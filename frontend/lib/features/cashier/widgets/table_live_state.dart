@@ -171,9 +171,11 @@ TableLiveSnapshot? computeTableLive(
 
           remainingSeconds: jsonToIntOrNull(billMap['remaining_seconds']),
 
+          isPackage: isPackage,
+
         )
 
-      : BillingCalculator.fromSessionData(table: table, billingMode: 'per_minute');
+      : BillingCalculator.fromSessionData(table: table, billingMode: billingMode);
 
 
 
@@ -192,6 +194,10 @@ TableLiveSnapshot? computeTableLive(
             openedAtRaw: table['opened_at']?.toString(),
 
             isPaused: false,
+
+            isPackage: true,
+
+            setPrice: packagePrice,
 
           );
 
@@ -214,6 +220,8 @@ TableLiveSnapshot? computeTableLive(
       plannedMinutes: base.plannedMinutes,
 
       remainingSeconds: remaining,
+
+      isPackage: true,
 
     );
 
@@ -291,6 +299,8 @@ TableLiveSnapshot? computeTableLive(
 
       remainingSeconds: base.remainingSeconds,
 
+      isPackage: false,
+
     );
 
     final expired = pausedBill.isCountdown && (pausedBill.remainingSeconds ?? 1) <= 0;
@@ -326,6 +336,10 @@ TableLiveSnapshot? computeTableLive(
     openedAtRaw: table['opened_at']?.toString(),
 
     isPaused: false,
+
+    isPackage: isPackage,
+
+    setPrice: packagePrice,
 
   );
 
@@ -376,6 +390,8 @@ TableLiveSnapshot? computeTableLive(
     plannedMinutes: base.plannedMinutes,
 
     remainingSeconds: remaining,
+
+    isPackage: isPackage,
 
   );
 
@@ -430,6 +446,8 @@ TableLiveSnapshot _finalizeSnapshot(Map<String, dynamic> table, TableLiveSnapsho
     plannedMinutes: withDiscount.bill.plannedMinutes,
 
     remainingSeconds: withDiscount.bill.remainingSeconds,
+
+    isPackage: withDiscount.bill.isPackage,
 
   );
 
@@ -490,6 +508,8 @@ TableLiveSnapshot _withDiscount(Map<String, dynamic> table, TableLiveSnapshot sn
     plannedMinutes: snapshot.bill.plannedMinutes,
 
     remainingSeconds: snapshot.bill.remainingSeconds,
+
+    isPackage: snapshot.bill.isPackage,
 
   );
 

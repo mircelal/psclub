@@ -40,14 +40,27 @@ class _ShiftsScreenState extends ConsumerState<ShiftsScreen> with SingleTickerPr
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    final pos = ref.read(posServiceProvider);
-    final from = DateTime.now().subtract(const Duration(days: 30));
-    final fromStr = '${from.year}-${from.month.toString().padLeft(2, '0')}-${from.day.toString().padLeft(2, '0')}';
-    final toStr = DateTime.now().toIso8601String().substring(0, 10);
-    _categories = await pos.getShiftCategories();
-    _shifts = await pos.getShifts(from: fromStr, to: toStr);
-    _movements = await pos.getCashMovements(from: fromStr, to: toStr);
-    if (mounted) setState(() => _loading = false);
+    try {
+      final pos = ref.read(posServiceProvider);
+      final from = DateTime.now().subtract(const Duration(days: 30));
+      final fromStr = '${from.year}-${from.month.toString().padLeft(2, '0')}-${from.day.toString().padLeft(2, '0')}';
+      final toStr = DateTime.now().toIso8601String().substring(0, 10);
+      final categories = await pos.getShiftCategories();
+      if (!mounted) return;
+      final shifts = await pos.getShifts(from: fromStr, to: toStr);
+      if (!mounted) return;
+      final movements = await pos.getCashMovements(from: fromStr, to: toStr);
+      if (!mounted) return;
+      setState(() {
+        _categories = categories;
+        _shifts = shifts;
+        _movements = movements;
+      });
+    } catch (e) {
+      if (mounted) showAppSnackBar(context, e.toString(), isError: true);
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   Future<void> _addExpense() async {

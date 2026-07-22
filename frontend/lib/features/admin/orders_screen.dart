@@ -25,6 +25,7 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
   bool _loading = true;
   DateTime _date = DateTime.now();
   String? _stateFilter;
+  int _loadSeq = 0;
 
   @override
   void initState() {
@@ -33,18 +34,22 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
   }
 
   Future<void> _load() async {
+    final seq = ++_loadSeq;
     setState(() => _loading = true);
     try {
       final d = DateFormat('yyyy-MM-dd').format(_date);
-      _orders = await ref.read(posServiceProvider).getOrders(
+      final orders = await ref.read(posServiceProvider).getOrders(
             from: d,
             to: d,
             orderState: _stateFilter,
           );
+      if (!mounted || seq != _loadSeq) return;
+      _orders = orders;
     } catch (_) {
+      if (!mounted || seq != _loadSeq) return;
       _orders = [];
     }
-    if (mounted) setState(() => _loading = false);
+    if (mounted && seq == _loadSeq) setState(() => _loading = false);
   }
 
   Future<void> _pickDate() async {
@@ -54,10 +59,16 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
       firstDate: DateTime(2024),
       lastDate: DateTime.now(),
     );
-    if (picked != null) {
-      setState(() => _date = picked);
-      _load();
-    }
+    if (!mounted || picked == null) return;
+    setState(() => _date = picked);
+    _load();
+  }
+
+  String _emptyOrdersLabel(DateFormat fmt) {
+    final now = DateTime.now();
+    final isToday = _date.year == now.year && _date.month == now.month && _date.day == now.day;
+    if (isToday) return 'Bu gün bağlanmış sifariş yoxdur';
+    return '${fmt.format(_date)} tarixində bağlanmış sifariş yoxdur';
   }
 
   Future<void> _openOrder(int id) async {
@@ -146,7 +157,12 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
             child: _loading
                 ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
                 : _orders.isEmpty
-                    ? Center(child: Text('Bu gün bağlanmış sifariş yoxdur', style: Theme.of(context).textTheme.bodyMedium))
+                    ? Center(
+                        child: Text(
+                          _emptyOrdersLabel(fmt),
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                      )
                     : ListView.builder(
                         padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxl),
                         itemCount: _orders.length,

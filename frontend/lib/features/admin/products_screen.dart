@@ -93,9 +93,6 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> with SingleTick
 
   Future<void> _uploadImage(int productId, PlatformFile file) async {
     final multipart = await multipartFromPlatformFile(file, fallbackName: 'product.jpg');
-    if (multipart == null) {
-      throw StateError('Şəkil oxunmadı');
-    }
     await ref.read(posServiceProvider).uploadProductImageMultipart(productId, multipart);
   }
 
@@ -344,12 +341,32 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> with SingleTick
 
     if (ok != true) return;
 
+    final name = nameCtrl.text.trim();
+    final price = double.tryParse(priceCtrl.text.replaceAll(',', '.'));
+    final stock = int.tryParse(stockCtrl.text.trim());
+    if (name.isEmpty) {
+      if (mounted) showAppSnackBar(context, 'Ad daxil edin', isError: true);
+      return;
+    }
+    if (price == null || price <= 0) {
+      if (mounted) showAppSnackBar(context, 'Qiymət 0-dan böyük olmalıdır', isError: true);
+      return;
+    }
+    if (stock == null) {
+      if (mounted) showAppSnackBar(context, 'Stok düzgün deyil', isError: true);
+      return;
+    }
+    if (stock < 0) {
+      if (mounted) showAppSnackBar(context, 'Stok mənfi ola bilməz', isError: true);
+      return;
+    }
+
     try {
       if (isEdit) {
         await ref.read(posServiceProvider).updateProduct(id, {
-          'name': nameCtrl.text.trim(),
-          'price': double.tryParse(priceCtrl.text) ?? 0,
-          'stock_quantity': int.tryParse(stockCtrl.text) ?? 0,
+          'name': name,
+          'price': price,
+          'stock_quantity': stock,
           'sku': skuCtrl.text.trim().isEmpty ? null : skuCtrl.text.trim(),
           'category_id': categoryId,
         });
@@ -357,9 +374,9 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> with SingleTick
         if (mounted) showAppSnackBar(context, 'Məhsul yeniləndi');
       } else {
         final newId = await ref.read(posServiceProvider).createProduct({
-          'name': nameCtrl.text.trim(),
-          'price': double.tryParse(priceCtrl.text) ?? 0,
-          'initial_stock': int.tryParse(stockCtrl.text) ?? 0,
+          'name': name,
+          'price': price,
+          'initial_stock': stock,
           if (skuCtrl.text.trim().isNotEmpty) 'sku': skuCtrl.text.trim(),
           if (categoryId != null) 'category_id': categoryId,
         });

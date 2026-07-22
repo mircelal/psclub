@@ -64,6 +64,8 @@ SessionBillSnapshot computeSessionLiveBill(
   final isPaused = session['status'] == 'paused';
   final billPreview = session['bill_preview'] as Map<String, dynamic>?;
   final plannedMinutes = jsonToIntOrNull(session['planned_minutes']);
+  final setPrice = jsonToDouble(session['set_price_snapshot']);
+  final isPackage = setPrice > 0;
 
   int activeSeconds;
   int? remainingFromLive;
@@ -73,6 +75,8 @@ SessionBillSnapshot computeSessionLiveBill(
       plannedMinutes: plannedMinutes,
       openedAtRaw: session['opened_at']?.toString(),
       isPaused: false,
+      isPackage: isPackage,
+      setPrice: setPrice,
     );
     activeSeconds = live.activeSeconds;
     remainingFromLive = live.remainingSeconds;
@@ -86,8 +90,7 @@ SessionBillSnapshot computeSessionLiveBill(
   }
 
   final isCounter = (session['session_type'] ?? 'table') == 'counter';
-  final setPrice = jsonToDouble(session['set_price_snapshot']);
-  if (setPrice <= 0 && plannedMinutes != null && plannedMinutes > 0) {
+  if (!isPackage && plannedMinutes != null && plannedMinutes > 0) {
     activeSeconds = BillingCalculator.capActiveSecondsForPlanned(activeSeconds, plannedMinutes);
   }
   final double timeCharge;
@@ -329,7 +332,16 @@ int _activeSeconds(DateTime opened, DateTime end, List<dynamic> pauses, bool isP
 double billGrossTotal(Map<String, dynamic> billMap) => jsonToDouble(billMap['total_amount']);
 
 /// Müştəri bonusu tətbiq olunmuş ödəniləcək məbləğ.
+///
+/// Canlı `fallback` (live gross) verilib və server preview gross-dan fərqlənirsə,
+/// köhnə `total_after_bonus` əvəzinə [adjustTotalForLoyalty] tətbiq olunur.
 double billPayableTotal(Map<String, dynamic> billMap, [double? fallback]) {
+  if (fallback != null) {
+    final previewGross = billGrossTotal(billMap);
+    if ((fallback - previewGross).abs() >= 0.02) {
+      return adjustTotalForLoyalty(billMap, fallback);
+    }
+  }
   final loyalty = billMap['loyalty_preview'] as Map<String, dynamic>?;
   if (loyalty != null) {
     return jsonToDouble(loyalty['total_after_bonus'], fallback ?? billGrossTotal(billMap));

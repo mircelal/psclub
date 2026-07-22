@@ -126,14 +126,13 @@ class _ProductProfileScreenState extends ConsumerState<ProductProfileScreen> wit
       lastDate: DateTime.now(),
       initialDateRange: DateTimeRange(start: _from, end: _to),
     );
-    if (range != null) {
-      setState(() {
-        _from = range.start;
-        _to = range.end;
-        _expandedDays.clear();
-      });
-      _load(silent: true);
-    }
+    if (!mounted || range == null) return;
+    setState(() {
+      _from = range.start;
+      _to = range.end;
+      _expandedDays.clear();
+    });
+    _load(silent: true);
   }
 
   List<Map<String, dynamic>> _salesLinesForDate(String date) {

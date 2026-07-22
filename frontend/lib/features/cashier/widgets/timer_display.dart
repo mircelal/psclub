@@ -25,8 +25,8 @@ class TimerDisplay extends StatelessWidget {
   final bool isUrgent;
   final Color? color;
 
-  /// Kolon yanıb-sönməsi — hər saniyə (valideyn tick-dən asılı deyil).
-  int get _tick => DateTime.now().second;
+  /// Kolon yanıb-sönməsi — valideyn [tick] varsa ondan, yoxsa saniyədən.
+  int get _blinkTick => tick ?? DateTime.now().second;
 
   @override
   Widget build(BuildContext context) {
@@ -66,7 +66,7 @@ class TimerDisplay extends StatelessWidget {
           : const Color(0xFFE8B86D);
       return _AnimatedClock(
         totalSeconds: bill.remainingSeconds!,
-        tick: _tick,
+        tick: _blinkTick,
         fontSize: size,
         color: isUrgent ? urgentColor : (color ?? urgentColor.withValues(alpha: 0.9)),
         urgent: isUrgent,
@@ -75,7 +75,7 @@ class TimerDisplay extends StatelessWidget {
 
     return _AnimatedClock(
       totalSeconds: bill.activeSeconds,
-      tick: _tick,
+      tick: _blinkTick,
       fontSize: size,
       color: color,
       urgent: false,

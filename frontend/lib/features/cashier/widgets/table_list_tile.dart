@@ -7,6 +7,7 @@ import '../../../core/utils/json_parse.dart';
 import '../../../core/utils/table_tariff_utils.dart';
 import '../../../core/widgets/money_text.dart';
 import '../../../core/widgets/status_badge.dart';
+import '../../../services/pos_service.dart';
 import 'table_live_state.dart';
 import 'table_session_items.dart';
 import 'time_expired_alert.dart';
@@ -251,6 +252,7 @@ class _TableListTileState extends ConsumerState<TableListTile> with SingleTicker
     required double titleSize,
     int maxSubtitleLines = 2,
   }) {
+    final promos = ref.watch(activePromotionsProvider).valueOrNull ?? [];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisAlignment: MainAxisAlignment.center,
@@ -271,7 +273,7 @@ class _TableListTileState extends ConsumerState<TableListTile> with SingleTicker
         ),
         const SizedBox(height: 4),
         Text(
-          activeSessionTariffLabel(widget.table) ?? formatTableTariffSummary(widget.table),
+          activeSessionTariffLabel(widget.table) ?? formatEffectiveTariffSummary(widget.table, promos),
           style: CashierTheme.caption(context),
           maxLines: maxSubtitleLines,
           overflow: TextOverflow.ellipsis,

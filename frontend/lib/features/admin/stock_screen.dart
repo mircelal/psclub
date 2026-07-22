@@ -30,10 +30,23 @@ class _StockScreenState extends ConsumerState<StockScreen> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    final pos = ref.read(posServiceProvider);
-    _alerts = await pos.getStockAlerts();
-    _movements = await pos.getStockMovements();
-    setState(() => _loading = false);
+    try {
+      final pos = ref.read(posServiceProvider);
+      final alerts = await pos.getStockAlerts();
+      if (!mounted) return;
+      final movements = await pos.getStockMovements();
+      if (!mounted) return;
+      setState(() {
+        _alerts = alerts;
+        _movements = movements;
+      });
+    } catch (e) {
+      if (mounted) {
+        showAppSnackBar(context, ApiClient.messageFromError(e), isError: true);
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   Future<void> _addMovement() async {
@@ -57,7 +70,7 @@ class _StockScreenState extends ConsumerState<StockScreen> {
               initialValue: productId,
               items: products.map((p) {
                 final m = p as Map<String, dynamic>;
-                return DropdownMenuItem(value: m['id'] as int, child: Text(m['name'] as String));
+                return DropdownMenuItem(value: jsonToInt(m['id']), child: Text(m['name'] as String));
               }).toList(),
               onChanged: (v) => setDlg(() => productId = v),
             ),

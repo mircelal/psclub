@@ -1,3 +1,5 @@
+import 'dart:math' show max;
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../services/pos_service.dart';
@@ -88,9 +90,9 @@ class BusinessConfig {
 
   List<int> get timedOpenPresets {
 
-    final min = minOpenMinutes;
+    final min = max(1, minOpenMinutes);
 
-    final step = extendStepMinutes;
+    final step = max(1, extendStepMinutes);
 
     const maxMinutes = 180; // 3 saat
 
@@ -112,7 +114,7 @@ class BusinessConfig {
 
   List<int> get extendTimeOptions {
 
-    final step = extendStepMinutes;
+    final step = max(1, extendStepMinutes);
 
     return [step, step * 2, step * 3, step * 4];
 
@@ -136,7 +138,7 @@ class BusinessConfig {
 
     if (minutes < minOpenMinutes || minutes > maxTimedOpenMinutes) return false;
 
-    return (minutes - minOpenMinutes) % extendStepMinutes == 0;
+    return (minutes - minOpenMinutes) % max(1, extendStepMinutes) == 0;
 
   }
 
@@ -220,13 +222,13 @@ class BusinessConfig {
 
       labels: VenueLabels.fromType(venueType),
 
-      minOpenMinutes: _int(biz['min_open_minutes'], 60),
+      minOpenMinutes: max(1, _int(biz['min_open_minutes'], 60)),
 
-      extendStepMinutes: _int(biz['extend_step_minutes'], 30),
+      extendStepMinutes: max(1, _int(biz['extend_step_minutes'], 30)),
 
-      minBillingMinutes: _int(biz['min_billing_minutes'], 60),
+      minBillingMinutes: max(1, _int(biz['min_billing_minutes'], 60)),
 
-      billingIncrementMinutes: _int(biz['billing_increment_minutes'], 30),
+      billingIncrementMinutes: max(1, _int(biz['billing_increment_minutes'], 30)),
 
       billingGraceMinutes: _int(biz['billing_grace_minutes'], 10),
 

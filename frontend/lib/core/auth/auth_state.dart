@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api/api_client.dart';
@@ -88,11 +89,21 @@ class AuthNotifier extends StateNotifier<AsyncValue<AuthUser?>> {
 
       state = AsyncValue.data(AuthUser.fromJson(res['data'] as Map<String, dynamic>));
 
-    } catch (_) {
+    } catch (e, st) {
 
-      await _api.clearToken();
+      if (e is DioException && e.response?.statusCode == 401) {
 
-      state = const AsyncValue.data(null);
+        await _api.clearToken();
+
+        state = const AsyncValue.data(null);
+
+      } else {
+
+        // Network/timeout/5xx: token saxla — router yalnız həqiqi unauth-da login göstərsin.
+
+        state = AsyncValue.error(e, st);
+
+      }
 
     }
 

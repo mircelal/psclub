@@ -57,11 +57,14 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
   Timer? _liveTimer;
   Timer? _syncTimer;
   int _tick = 0;
+  /// Yerli mutasiya sayğacı — köhnə poll cavabının təzə səbəti üstələməsinin qarşısını alır.
+  int _mutationSeq = 0;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       ref.read(openSessionIdProvider.notifier).setOpen(widget.sessionId);
     });
     _loadSession();
@@ -142,6 +145,7 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
   }
 
   Future<void> _loadSession({bool silent = false}) async {
+    final seqAtStart = _mutationSeq;
     if (!silent) {
       setState(() {
         _sessionLoading = true;
@@ -151,11 +155,21 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
     try {
       final session = await ref.read(posServiceProvider).getSession(widget.sessionId);
       if (!mounted) return;
+      // Yerli mutasiya bu poll-dan sonra baş veribsə — köhnə cavabı yazma.
+      if (silent && seqAtStart != _mutationSeq) {
+        return;
+      }
       final prevUpdated = _session?['updated_at']?.toString();
       final nextUpdated = session['updated_at']?.toString();
-      if (silent && prevUpdated != null && prevUpdated == nextUpdated) {
-        _mergeSessionPromotionFields(session);
-        return;
+      if (silent && prevUpdated != null && nextUpdated != null) {
+        if (prevUpdated == nextUpdated) {
+          _mergeSessionPromotionFields(session);
+          return;
+        }
+        // Köhnə updated_at — təzə mutasiya nəticəsini üstələmə.
+        if (nextUpdated.compareTo(prevUpdated) < 0) {
+          return;
+        }
       }
       setState(() {
         _session = session;
@@ -172,6 +186,8 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
   }
 
   void _applySession(Map<String, dynamic> session) {
+    if (!mounted) return;
+    _mutationSeq++;
     setState(() => _session = session);
     widget.onChanged();
   }
@@ -265,6 +281,7 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
   }
 
   Future<void> _togglePause() async {
+    if (_actionLoading || _itemBusy || _session == null) return;
     setState(() => _actionLoading = true);
     try {
       final status = _session!['status'] as String;
@@ -275,8 +292,12 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
         await ref.read(posServiceProvider).resumeSession(widget.sessionId);
         AppFeedback.success();
       }
+      if (!mounted) return;
       await _loadSession(silent: true);
       widget.onChanged();
+    } catch (e) {
+      AppFeedback.error();
+      if (mounted) showAppSnackBar(context, e.toString(), isError: true);
     } finally {
       if (mounted) setState(() => _actionLoading = false);
     }
@@ -590,8 +611,9 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
 
     final billPreview = _session!['bill_preview'] as Map<String, dynamic>?;
     final loyaltyCredit = billPreview != null ? billLoyaltyCredit(billPreview) : null;
+    // Live gross may diverge from stale bill_preview — adjust loyalty against live total.
     final displayTotal = billPreview != null
-        ? billPayableTotal(billPreview, live.totalAmount)
+        ? adjustTotalForLoyalty(billPreview, live.totalAmount)
         : live.totalAmount;
 
     return Column(
@@ -907,6 +929,7 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
   }
 
   Future<void> _closeSession() async {
+    if (_actionLoading) return;
     if (_isCounter && _items.isNotEmpty && !_counterNeedsPayment) {
       setState(() => _actionLoading = true);
       try {
@@ -936,6 +959,7 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
     final closed = await showDialog<bool>(
       context: context,
       barrierColor: Colors.black54,
+      barrierDismissible: false,
       builder: (_) => CloseSessionDialog(
         sessionId: widget.sessionId,
         tableName: _session!['table_name'] as String? ?? '',

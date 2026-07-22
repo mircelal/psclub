@@ -37,8 +37,20 @@ class ApiClient {
           final path = error.requestOptions.path;
           final isPublic = path.contains('/public/') || path.contains('/auth/login');
           if (!isPublic) {
-            await _storage.delete();
-            onUnauthorized?.call();
+            // Stale 401: yalnız request-dəki bearer hələ də cari token-dirsə logout et.
+            final currentToken = await _storage.read();
+            if (currentToken != null && currentToken.isNotEmpty) {
+              final authHeader = error.requestOptions.headers['Authorization']?.toString();
+              final requestBearer = (authHeader != null &&
+                      authHeader.length > 7 &&
+                      authHeader.toLowerCase().startsWith('bearer '))
+                  ? authHeader.substring(7)
+                  : null;
+              if (requestBearer == currentToken) {
+                await _storage.delete();
+                onUnauthorized?.call();
+              }
+            }
           }
         }
         handler.next(error);

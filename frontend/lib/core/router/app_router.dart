@@ -21,7 +21,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       final user = auth.valueOrNull;
       final loggingIn = loc == '/login';
 
-      if (auth.isLoading) return null;
+      if (auth.isLoading) return loggingIn ? null : '/login';
       if (user == null) return loggingIn ? null : '/login';
       if (loggingIn) return user.isAdmin ? '/admin' : '/cashier';
       if (loc.startsWith('/admin') && !user.isAdmin) return '/cashier';
@@ -45,6 +45,9 @@ class _AuthRefresh extends ChangeNotifier {
       if (previous?.isLoading != true && prevId == nextId) return;
       debounce?.cancel();
       debounce = Timer(const Duration(milliseconds: 80), notifyListeners);
+    });
+    ref.onDispose(() {
+      debounce?.cancel();
     });
   }
   final Ref ref;

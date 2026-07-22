@@ -1,4 +1,5 @@
 import '../utils/json_parse.dart';
+import '../utils/session_datetime.dart';
 
 class BillingPreview {
   BillingPreview({
@@ -8,6 +9,7 @@ class BillingPreview {
     required this.totalAmount,
     this.plannedMinutes,
     this.remainingSeconds,
+    this.isPackage = false,
   });
 
   final int activeSeconds;
@@ -16,8 +18,9 @@ class BillingPreview {
   final double totalAmount;
   final int? plannedMinutes;
   final int? remainingSeconds;
+  final bool isPackage;
 
-  bool get isCountdown => plannedMinutes != null && plannedMinutes! > 0;
+  bool get isCountdown => !isPackage && plannedMinutes != null && plannedMinutes! > 0;
 }
 
 class BillingCalculator {
@@ -170,6 +173,7 @@ class BillingCalculator {
     required String billingMode,
     DateTime? now,
   }) {
+    final isPackage = jsonToDouble(table['set_price_snapshot'] ?? table['session_set_price']) > 0;
     final bill = table['bill_preview'] as Map<String, dynamic>?;
     if (bill != null) {
       return BillingPreview(
@@ -179,18 +183,36 @@ class BillingCalculator {
         totalAmount: jsonToDouble(bill['total_amount']),
         plannedMinutes: jsonToIntOrNull(bill['planned_minutes']),
         remainingSeconds: jsonToIntOrNull(bill['remaining_seconds']),
+        isPackage: isPackage,
       );
     }
 
-    final openedAt = DateTime.tryParse(table['opened_at']?.toString() ?? '') ?? now ?? DateTime.now();
-    final activeSeconds = calculateActiveSeconds(openedAt: openedAt, pauses: [], now: now);
+    final end = (now ?? SessionClock.nowUtc()).toUtc();
+    final openedAt = parseSessionDateTime(table['opened_at']?.toString())?.toUtc() ?? end;
+    final pauses = <({DateTime pausedAt, DateTime? resumedAt})>[];
+    final pausesRaw = table['pauses'] as List<dynamic>? ?? [];
+    for (final raw in pausesRaw) {
+      if (raw is! Map) continue;
+      final p = Map<String, dynamic>.from(raw);
+      final pausedAt = parseSessionDateTime(p['paused_at']?.toString())?.toUtc();
+      if (pausedAt == null) continue;
+      pauses.add((
+        pausedAt: pausedAt,
+        resumedAt: parseSessionDateTime(p['resumed_at']?.toString())?.toUtc(),
+      ));
+    }
+
+    final activeSeconds = calculateActiveSeconds(openedAt: openedAt, pauses: pauses, now: end);
     final rate = double.tryParse(table['session_hourly_rate']?.toString() ?? table['hourly_rate']?.toString() ?? '') ?? 0;
-    final timeCharge = calculateTimeCharge(
-      activeSeconds: activeSeconds,
-      hourlyRate: rate,
-      billingMode: billingMode,
-    );
     final planned = jsonToIntOrNull(table['planned_minutes']);
+    final timeCharge = isPackage
+        ? jsonToDouble(table['set_price_snapshot'] ?? table['session_set_price'])
+        : calculateTimeCharge(
+            activeSeconds: activeSeconds,
+            hourlyRate: rate,
+            billingMode: billingMode,
+            plannedMinutes: planned,
+          );
     final remaining = planned != null && planned > 0
         ? (planned * 60 - activeSeconds).clamp(0, planned * 60)
         : null;
@@ -202,6 +224,7 @@ class BillingCalculator {
       totalAmount: timeCharge,
       plannedMinutes: planned,
       remainingSeconds: remaining,
+      isPackage: isPackage,
     );
   }
 }

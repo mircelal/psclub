@@ -175,6 +175,47 @@ void main() {
     expect(live.remainingSeconds, 0);
   });
 
+  test('liveSessionSeconds does not freeze activeSeconds for packages after expiry', () {
+    final now = DateTime.utc(2026, 6, 19, 12, 0, 0);
+    SessionClock.reset();
+    SessionClock.sync(now.toIso8601String());
+    addTearDown(SessionClock.reset);
+
+    final computedAt = now.subtract(const Duration(minutes: 10));
+    final billPreview = {
+      'active_seconds': 3600,
+      'remaining_seconds': 0,
+      'computed_at': computedAt.toIso8601String(),
+    };
+
+    final live = liveSessionSeconds(
+      billPreview: billPreview,
+      plannedMinutes: 60,
+      openedAtRaw: now.subtract(const Duration(hours: 2)).toIso8601String(),
+      isPaused: false,
+      isPackage: true,
+      setPrice: 20,
+    );
+
+    expect(live.activeSeconds, 3600 + 10 * 60);
+    expect(live.remainingSeconds, 0);
+  });
+
+  test('billPayableTotal uses live fallback adjusted by loyalty when gross diverges', () {
+    final billMap = {
+      'total_amount': 20.0,
+      'loyalty_preview': {
+        'loyalty_credit': 5.0,
+        'total_after_bonus': 15.0,
+      },
+    };
+
+    // Stale preview net would be 15; live gross 30 → 30 - 5 = 25
+    expect(billPayableTotal(billMap, 30.0), closeTo(25.0, 0.01));
+    // Matching live gross still prefers server total_after_bonus
+    expect(billPayableTotal(billMap, 20.0), closeTo(15.0, 0.01));
+  });
+
   test('computeSessionLiveBill caps timed session at planned duration', () {
     final now = DateTime.utc(2026, 6, 19, 12, 0, 0);
     SessionClock.reset();

@@ -138,10 +138,23 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
 
   void _syncMixed() {
     if (_method != 'mixed' || _bill == null) return;
-    final cash = double.tryParse(_cashCtrl.text) ?? 0;
-    final remaining = (_bill!.totalAmount - cash).clamp(0, _bill!.totalAmount);
-    if (_cardCtrl.text != remaining.toStringAsFixed(2)) {
-      _cardCtrl.text = remaining.toStringAsFixed(2);
+    final total = _bill!.totalAmount;
+    var cash = double.tryParse(_cashCtrl.text.replaceAll(',', '.')) ?? 0;
+    if (cash < 0) cash = 0;
+    if (cash > total) {
+      cash = total;
+      final clamped = cash.toStringAsFixed(2);
+      if (_cashCtrl.text != clamped) {
+        _cashCtrl.value = TextEditingValue(
+          text: clamped,
+          selection: TextSelection.collapsed(offset: clamped.length),
+        );
+      }
+    }
+    final remaining = (total - cash).clamp(0.0, total);
+    final remText = remaining.toStringAsFixed(2);
+    if (_cardCtrl.text != remText) {
+      _cardCtrl.text = remText;
     }
   }
 
@@ -182,19 +195,29 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
       }
       await _loadBill();
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
-      }
+      if (!mounted) return;
       setState(() => _loadingBill = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
     }
   }
 
   Future<void> _close() async {
-    if (_bill == null) return;
+    if (_bill == null || _loading) return;
+    if (_method == 'mixed') {
+      final cash = double.tryParse(_cashCtrl.text.replaceAll(',', '.')) ?? 0;
+      final card = double.tryParse(_cardCtrl.text.replaceAll(',', '.')) ?? 0;
+      final total = _bill!.totalAmount;
+      if ((cash + card - total).abs() > 0.02 || cash < 0 || card < 0 || cash > total + 0.001) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Nağd + kart ümumi məbləğə bərabər olmalıdır')),
+        );
+        return;
+      }
+    }
     setState(() => _loading = true);
     try {
-      final cash = double.tryParse(_cashCtrl.text) ?? 0;
-      final card = double.tryParse(_cardCtrl.text) ?? 0;
+      final cash = double.tryParse(_cashCtrl.text.replaceAll(',', '.')) ?? 0;
+      final card = double.tryParse(_cardCtrl.text.replaceAll(',', '.')) ?? 0;
       final result = await ref.read(posServiceProvider).closeSession(
             widget.sessionId,
             method: _method,
@@ -203,6 +226,7 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
             redeemBonusMinutes: _useBonusMinutes ? _customerBonusMinutes : 0,
             redeemBonusWallet: _useBonusWallet ? _customerBonusWallet : 0,
           );
+      if (!mounted) return;
       refreshCurrentShift(ref);
       setState(() {
         _receipt = result['receipt'] as Map<String, dynamic>?;
@@ -210,11 +234,10 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
       });
       AppFeedback.success();
     } catch (e) {
-      setState(() => _loading = false);
       AppFeedback.error();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
-      }
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
     }
   }
 

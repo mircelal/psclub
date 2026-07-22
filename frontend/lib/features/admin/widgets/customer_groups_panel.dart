@@ -129,6 +129,10 @@ class CustomerGroupsPanelState extends ConsumerState<CustomerGroupsPanel> {
       if (mounted) showAppSnackBar(context, 'Ad və endirim dəyəri tələb olunur', isError: true);
       return;
     }
+    if (discountType == 'percent' && value > 100) {
+      if (mounted) showAppSnackBar(context, 'Faiz 100-dən çox ola bilməz', isError: true);
+      return;
+    }
 
     final payload = {
       'name': name,

@@ -146,21 +146,38 @@ class LoyaltyTiersPanelState extends ConsumerState<LoyaltyTiersPanel> {
       return;
     }
 
-    final payload = <String, dynamic>{
-      'name': nameCtrl.text.trim(),
-      'spend_threshold': double.tryParse(thresholdCtrl.text.replaceAll(',', '.')) ?? 500,
-      'reward_kind': rewardKind,
-      'reward_value': double.tryParse(valueCtrl.text.replaceAll(',', '.')) ?? 0,
-      'is_active': isActive,
-    };
-    if (rewardKind == 'hours_percent' && rateCtrl.text.trim().isNotEmpty) {
-      payload['reference_hourly_rate'] = double.tryParse(rateCtrl.text.replaceAll(',', '.'));
-    }
-
+    final name = nameCtrl.text.trim();
+    final threshold = double.tryParse(thresholdCtrl.text.replaceAll(',', '.'));
+    final rewardValue = double.tryParse(valueCtrl.text.replaceAll(',', '.'));
+    final rateText = rateCtrl.text.trim();
     nameCtrl.dispose();
     thresholdCtrl.dispose();
     valueCtrl.dispose();
     rateCtrl.dispose();
+
+    if (name.isEmpty) {
+      if (mounted) showAppSnackBar(context, 'Ad daxil edin', isError: true);
+      return;
+    }
+    if (threshold == null || threshold <= 0) {
+      if (mounted) showAppSnackBar(context, 'Xərcləmə həddi 0-dan böyük olmalıdır', isError: true);
+      return;
+    }
+    if (rewardValue == null || rewardValue <= 0) {
+      if (mounted) showAppSnackBar(context, 'Mükafat dəyəri 0-dan böyük olmalıdır', isError: true);
+      return;
+    }
+
+    final payload = <String, dynamic>{
+      'name': name,
+      'spend_threshold': threshold,
+      'reward_kind': rewardKind,
+      'reward_value': rewardValue,
+      'is_active': isActive,
+    };
+    if (rewardKind == 'hours_percent' && rateText.isNotEmpty) {
+      payload['reference_hourly_rate'] = double.tryParse(rateText.replaceAll(',', '.'));
+    }
 
     try {
       if (isEdit) {

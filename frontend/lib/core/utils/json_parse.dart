@@ -9,7 +9,13 @@ double jsonToDouble(dynamic value, [double fallback = 0]) {
 int? jsonToIntOrNull(dynamic value) {
   if (value == null) return null;
   if (value is num) return value.toInt();
-  if (value is String) return int.tryParse(value);
+  if (value is String) {
+    final asInt = int.tryParse(value);
+    if (asInt != null) return asInt;
+    final asDouble = double.tryParse(value);
+    if (asDouble != null) return asDouble.toInt();
+    return null;
+  }
   return null;
 }
 

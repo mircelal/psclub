@@ -71,32 +71,32 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     setState(() => _loading = true);
     try {
       _data = await ref.read(posServiceProvider).getSettings();
+      if (!mounted) return;
+      final biz = _data!['business'] as Map<String, dynamic>;
+      _nameCtrl.text = biz['name']?.toString() ?? '';
+      _taglineCtrl.text = biz['tagline']?.toString() ?? '';
+      _billingMode = biz['billing_mode'] as String? ?? 'per_minute';
+      _venueType = biz['venue_type']?.toString() ?? 'gaming';
+      final tb = biz['time_billing_enabled'];
+      _timeBillingEnabled = tb == null || tb == true || tb == 1 || tb == '1';
+      _minOpenCtrl.text = '${biz['min_open_minutes'] ?? 60}';
+      _extendStepCtrl.text = '${biz['extend_step_minutes'] ?? 30}';
+      _minBillingCtrl.text = '${biz['min_billing_minutes'] ?? 60}';
+      _billingIncCtrl.text = '${biz['billing_increment_minutes'] ?? 30}';
+      _billingGraceCtrl.text = '${biz['billing_grace_minutes'] ?? 10}';
+      _logoUrl = MediaUrl.resolve(biz['logo_url']?.toString());
+      _localLogoPath = null;
+      _localLogoBytes = null;
+      final settings = _data!['settings'] as Map<String, dynamic>? ?? {};
+      _headerCtrl.text = settings['receipt_header']?.toString() ?? _nameCtrl.text;
+      _footerCtrl.text = settings['receipt_footer']?.toString() ?? '';
     } catch (e) {
       if (mounted) {
-        setState(() => _loading = false);
         showAppSnackBar(context, ApiClient.messageFromError(e), isError: true);
       }
-      return;
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
-    final biz = _data!['business'] as Map<String, dynamic>;
-    _nameCtrl.text = biz['name']?.toString() ?? '';
-    _taglineCtrl.text = biz['tagline']?.toString() ?? '';
-    _billingMode = biz['billing_mode'] as String? ?? 'per_minute';
-    _venueType = biz['venue_type']?.toString() ?? 'gaming';
-    final tb = biz['time_billing_enabled'];
-    _timeBillingEnabled = tb == null || tb == true || tb == 1 || tb == '1';
-    _minOpenCtrl.text = '${biz['min_open_minutes'] ?? 60}';
-    _extendStepCtrl.text = '${biz['extend_step_minutes'] ?? 30}';
-    _minBillingCtrl.text = '${biz['min_billing_minutes'] ?? 60}';
-    _billingIncCtrl.text = '${biz['billing_increment_minutes'] ?? 30}';
-    _billingGraceCtrl.text = '${biz['billing_grace_minutes'] ?? 10}';
-    _logoUrl = MediaUrl.resolve(biz['logo_url']?.toString());
-    _localLogoPath = null;
-    _localLogoBytes = null;
-    final settings = _data!['settings'] as Map<String, dynamic>? ?? {};
-    _headerCtrl.text = settings['receipt_header']?.toString() ?? _nameCtrl.text;
-    _footerCtrl.text = settings['receipt_footer']?.toString() ?? '';
-    setState(() => _loading = false);
   }
 
   Future<void> _pickLogo() async {
@@ -108,13 +108,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (result == null || result.files.isEmpty) return;
 
     final file = result.files.single;
-    final multipart = await multipartFromPlatformFile(file, fallbackName: 'logo.png');
-    if (multipart == null) {
-      if (mounted) {
-        showAppSnackBar(context, 'Şəkil oxunmadı — başqa fayl seçin', isError: true);
-      }
-      return;
-    }
 
     setState(() {
       _localLogoPath = kIsWeb ? null : file.path;
@@ -122,6 +115,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     });
 
     try {
+      final multipart = await multipartFromPlatformFile(file, fallbackName: 'logo.png');
       final url = await ref.read(posServiceProvider).uploadBusinessLogoMultipart(multipart);
       setState(() {
         _logoUrl = MediaUrl.resolve(url);

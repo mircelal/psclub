@@ -130,8 +130,8 @@ class _CustomerProfileScreenState extends ConsumerState<CustomerProfileScreen> {
       await ref.read(posServiceProvider).updateCustomer(widget.customerId, {
         'name': name,
         'phone': phone,
-        if (email.isNotEmpty) 'email': email,
-        if (notes.isNotEmpty) 'notes': notes,
+        'email': email,
+        'notes': notes,
       });
       await _load();
       widget.onUpdated?.call();

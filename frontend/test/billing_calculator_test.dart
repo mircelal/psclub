@@ -1,6 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:psclub_pos/core/billing/billing_calculator.dart';
 import 'package:psclub_pos/core/billing/effective_tariff_quote.dart';
+import 'package:psclub_pos/core/utils/json_parse.dart';
+import 'package:psclub_pos/core/utils/session_datetime.dart';
 
 void main() {
   const minM = 60;
@@ -111,5 +113,59 @@ void main() {
     expect(quote.effectiveHourly, 4.5);
     expect(quote.hasDiscount, isTrue);
     expect(quote.effectiveLabel, '4.50 ₼ / saat');
+  });
+
+  test('package session isCountdown is false even with planned minutes', () {
+    final preview = BillingPreview(
+      activeSeconds: 100,
+      timeCharge: 15,
+      productsTotal: 0,
+      totalAmount: 15,
+      plannedMinutes: 60,
+      remainingSeconds: 3500,
+      isPackage: true,
+    );
+    expect(preview.isCountdown, isFalse);
+    expect(
+      BillingPreview(
+        activeSeconds: 100,
+        timeCharge: 10,
+        productsTotal: 0,
+        totalAmount: 10,
+        plannedMinutes: 60,
+        remainingSeconds: 3500,
+      ).isCountdown,
+      isTrue,
+    );
+  });
+
+  test('fromSessionData marks package from session_set_price', () {
+    final now = DateTime.utc(2026, 6, 19, 12, 0, 0);
+    SessionClock.reset();
+    SessionClock.sync(now.toIso8601String());
+    addTearDown(SessionClock.reset);
+
+    final preview = BillingCalculator.fromSessionData(
+      table: {
+        'opened_at': now.subtract(const Duration(minutes: 30)).toIso8601String(),
+        'session_set_price': 20.0,
+        'planned_minutes': 60,
+        'session_hourly_rate': 10.0,
+        'pauses': [],
+      },
+      billingMode: 'min_1h_then_30',
+      now: now,
+    );
+
+    expect(preview.isPackage, isTrue);
+    expect(preview.isCountdown, isFalse);
+    expect(preview.timeCharge, closeTo(20.0, 0.01));
+  });
+
+  test('jsonToIntOrNull parses decimal strings', () {
+    expect(jsonToIntOrNull('60.0'), 60);
+    expect(jsonToIntOrNull('90.5'), 90);
+    expect(jsonToIntOrNull('42'), 42);
+    expect(jsonToIntOrNull(null), isNull);
   });
 }

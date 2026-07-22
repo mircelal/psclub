@@ -45,25 +45,33 @@ class _DiscountsScreenState extends ConsumerState<DiscountsScreen> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    final service = ref.read(posServiceProvider);
-    final results = await Future.wait([
-      service.getPromotions(),
-      service.getTables(),
-      service.getProducts(),
-    ]);
-    _promotions = results[0];
-    final tables = results[1];
-    _products = (results[2] as List).cast<Map<String, dynamic>>();
-    final names = <String>{};
-    for (final raw in tables) {
-      final table = raw as Map<String, dynamic>;
-      for (final t in (table['tariffs'] as List<dynamic>? ?? [])) {
-        final name = (t as Map)['name']?.toString().trim();
-        if (name != null && name.isNotEmpty) names.add(name);
+    try {
+      final service = ref.read(posServiceProvider);
+      final results = await Future.wait([
+        service.getPromotions(),
+        service.getTables(),
+        service.getProducts(),
+      ]);
+      if (!mounted) return;
+      _promotions = results[0];
+      final tables = results[1];
+      _products = (results[2] as List).cast<Map<String, dynamic>>();
+      final names = <String>{};
+      for (final raw in tables) {
+        final table = raw as Map<String, dynamic>;
+        for (final t in (table['tariffs'] as List<dynamic>? ?? [])) {
+          final name = (t as Map)['name']?.toString().trim();
+          if (name != null && name.isNotEmpty) names.add(name);
+        }
       }
+      _tariffNames = names.toList()..sort();
+    } catch (e) {
+      if (mounted) {
+        showAppSnackBar(context, ApiClient.messageFromError(e), isError: true);
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
-    _tariffNames = names.toList()..sort();
-    if (mounted) setState(() => _loading = false);
   }
 
   String _productName(int id) {
@@ -318,6 +326,10 @@ class _DiscountsScreenState extends ConsumerState<DiscountsScreen> {
     final value = double.tryParse(valueCtrl.text.replaceAll(',', '.')) ?? 0;
     if (nameCtrl.text.trim().isEmpty || value <= 0) {
       showAppSnackBar(context, 'Ad və endirim dəyəri tələb olunur', isError: true);
+      return;
+    }
+    if (discountType == 'percent' && value > 100) {
+      showAppSnackBar(context, 'Faiz 100-dən çox ola bilməz', isError: true);
       return;
     }
     if (scope == 'tariffs' && selectedTariffs.isEmpty) {

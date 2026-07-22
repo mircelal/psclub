@@ -3,7 +3,10 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 
 /// FilePicker nəticəsindən Dio multipart (web + desktop).
-Future<MultipartFile?> multipartFromPlatformFile(
+///
+/// Əvvəlcə [PlatformFile.bytes], boşdursa (və web deyilsə) [PlatformFile.path]
+/// istifadə olunur. Hər ikisi uğursuz olarsa [StateError] atır — null qaytarmır.
+Future<MultipartFile> multipartFromPlatformFile(
   PlatformFile file, {
   required String fallbackName,
 }) async {
@@ -17,5 +20,8 @@ Future<MultipartFile?> multipartFromPlatformFile(
     return MultipartFile.fromFile(file.path!, filename: name);
   }
 
-  return null;
+  throw StateError(
+    'Fayl oxunmadı: nə bayt, nə də yol mövcuddur '
+    '(web-də withData: true tələb olunur)',
+  );
 }

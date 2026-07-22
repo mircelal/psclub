@@ -28,8 +28,17 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    _tables = await ref.read(posServiceProvider).getTables();
-    setState(() => _loading = false);
+    try {
+      final tables = await ref.read(posServiceProvider).getTables();
+      if (!mounted) return;
+      setState(() => _tables = tables);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Xəta: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   Future<void> _showForm({Map<String, dynamic>? table}) async {
@@ -150,6 +159,15 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
       return;
     }
 
+    final tableName = nameCtrl.text.trim();
+    if (tableName.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Masa adı tələb olunur')),
+      );
+      nameCtrl.dispose();
+      return;
+    }
+
     if (tariffs.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Ən azı bir düzgün tarif daxil edin')),
@@ -161,11 +179,11 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
     final service = ref.read(posServiceProvider);
     if (isEdit) {
       await service.updateTable(table['id'] as int, {
-        'name': nameCtrl.text.trim(),
+        'name': tableName,
         'tariffs': tariffs,
       });
     } else {
-      await service.createTable(nameCtrl.text.trim(), tariffs: tariffs);
+      await service.createTable(tableName, tariffs: tariffs);
     }
     nameCtrl.dispose();
     _load();

@@ -23,6 +23,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   bool _loading = true;
   DateTime _from = DateTime.now().subtract(const Duration(days: 29));
   DateTime _to = DateTime.now();
+  int _loadSeq = 0;
 
   @override
   void initState() {
@@ -31,16 +32,20 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   }
 
   Future<void> _load() async {
+    final seq = ++_loadSeq;
     setState(() => _loading = true);
     try {
-      _data = await ref.read(posServiceProvider).getDashboard(
+      final data = await ref.read(posServiceProvider).getDashboard(
             from: DateFormat('yyyy-MM-dd').format(_from),
             to: DateFormat('yyyy-MM-dd').format(_to),
           );
+      if (!mounted || seq != _loadSeq) return;
+      _data = data;
     } catch (_) {
+      if (!mounted || seq != _loadSeq) return;
       _data = null;
     }
-    if (mounted) setState(() => _loading = false);
+    if (mounted && seq == _loadSeq) setState(() => _loading = false);
   }
 
   Future<void> _pickRange() async {
@@ -50,13 +55,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       lastDate: DateTime.now(),
       initialDateRange: DateTimeRange(start: _from, end: _to),
     );
-    if (range != null) {
-      setState(() {
-        _from = range.start;
-        _to = range.end;
-      });
-      _load();
-    }
+    if (!mounted || range == null) return;
+    setState(() {
+      _from = range.start;
+      _to = range.end;
+    });
+    _load();
   }
 
   @override

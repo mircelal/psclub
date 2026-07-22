@@ -20,19 +20,36 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
   Map<String, dynamic>? _report;
   bool _loading = false;
   DateTime _date = DateTime.now();
+  int _loadSeq = 0;
 
   Future<void> _load() async {
+    final seq = ++_loadSeq;
     setState(() => _loading = true);
-    final d = DateFormat('yyyy-MM-dd').format(_date);
-    _report = await ref.read(posServiceProvider).getDailyReport(d);
-    setState(() => _loading = false);
+    try {
+      final d = DateFormat('yyyy-MM-dd').format(_date);
+      final report = await ref.read(posServiceProvider).getDailyReport(d);
+      if (!mounted || seq != _loadSeq) return;
+      setState(() => _report = report);
+    } catch (e) {
+      if (mounted && seq == _loadSeq) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Xəta: $e')));
+      }
+    } finally {
+      if (mounted && seq == _loadSeq) setState(() => _loading = false);
+    }
   }
 
   Future<void> _closeDay() async {
     final d = DateFormat('yyyy-MM-dd').format(_date);
-    await ref.read(posServiceProvider).dailyClose(d);
-    if (mounted) {
+    try {
+      await ref.read(posServiceProvider).dailyClose(d);
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Gün uğurla bağlandı')));
+      await _load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Xəta: $e')));
+      }
     }
   }
 
@@ -52,10 +69,9 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                 firstDate: DateTime(2024),
                 lastDate: DateTime.now(),
               );
-              if (picked != null) {
-                setState(() => _date = picked);
-                _load();
-              }
+              if (!mounted || picked == null) return;
+              setState(() => _date = picked);
+              _load();
             },
             icon: const Icon(Icons.calendar_today, size: 18),
             label: Text(DateFormat('dd.MM.yyyy').format(_date)),

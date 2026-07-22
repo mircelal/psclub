@@ -19,7 +19,16 @@ class _KioskSettingsListenerState extends ConsumerState<KioskSettingsListener> {
   void initState() {
     super.initState();
     ref.listenManual(appSettingsProvider, (prev, next) {
-      next.whenData(DesktopWindowService.apply);
+      next.whenData((settings) {
+        final prevSettings = prev?.valueOrNull;
+        final kioskChanged = prevSettings == null ||
+            prevSettings.kioskModeEnabled != settings.kioskModeEnabled ||
+            prevSettings.kioskLocked != settings.kioskLocked ||
+            prevSettings.launchAtStartup != settings.launchAtStartup;
+        if (kioskChanged) {
+          DesktopWindowService.apply(settings);
+        }
+      });
     });
   }
 

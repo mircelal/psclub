@@ -3,6 +3,7 @@ import '../../../core/utils/json_parse.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 
+/// Horizontal quick-pick strip. Currently unused in the cashier UI; kept for reuse.
 class ProductQuickPick extends StatelessWidget {
   const ProductQuickPick({
     super.key,

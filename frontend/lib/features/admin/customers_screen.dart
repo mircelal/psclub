@@ -42,6 +42,7 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
   bool _loading = true;
   CustomerListFilter _filter = CustomerListFilter.all;
   final _searchCtrl = TextEditingController();
+  int _loadSeq = 0;
 
   @override
   void initState() {
@@ -57,19 +58,22 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
   }
 
   Future<void> _load() async {
+    final seq = ++_loadSeq;
     setState(() => _loading = true);
     try {
       final list = await ref.read(posServiceProvider).searchCustomers(
             '',
             filter: _filter.apiValue,
           );
+      if (!mounted || seq != _loadSeq) return;
       _all = list.cast<Map<String, dynamic>>();
       _applyLocalSearch();
     } catch (_) {
+      if (!mounted || seq != _loadSeq) return;
       _all = [];
       _filtered = [];
     }
-    if (mounted) setState(() => _loading = false);
+    if (mounted && seq == _loadSeq) setState(() => _loading = false);
   }
 
   void _applyLocalSearch() {
@@ -106,6 +110,13 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
     try {
       groups = await ref.read(posServiceProvider).getActiveCustomerGroups();
     } catch (_) {}
+    if (!mounted) {
+      nameCtrl.dispose();
+      phoneCtrl.dispose();
+      emailCtrl.dispose();
+      notesCtrl.dispose();
+      return;
+    }
     int? groupId = jsonToIntOrNull(customer?['customer_group_id']);
 
     final ok = await showAppDialog<bool>(
@@ -184,19 +195,19 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
     try {
       final service = ref.read(posServiceProvider);
       if (isEdit) {
-        await service.updateCustomer(customer['id'] as int, {
+        await service.updateCustomer(jsonToInt(customer['id']), {
           'name': name,
           'phone': phone,
-          if (email.isNotEmpty) 'email': email,
-          if (notes.isNotEmpty) 'notes': notes,
+          'email': email,
+          'notes': notes,
           'customer_group_id': groupId,
         });
       } else {
         await service.createCustomer({
           'name': name,
           'phone': phone,
-          if (email.isNotEmpty) 'email': email,
-          if (notes.isNotEmpty) 'notes': notes,
+          'email': email,
+          'notes': notes,
           if (groupId != null) 'customer_group_id': groupId,
         });
       }
@@ -358,16 +369,33 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
                               Navigator.of(context).push(
                                 MaterialPageRoute<void>(
                                   builder: (_) => CustomerProfileScreen(
-                                    customerId: c['id'] as int,
+                                    customerId: jsonToInt(c['id']),
                                     onUpdated: _load,
                                   ),
                                 ),
                               );
                             },
                             onDelete: () async {
-                              await ref.read(posServiceProvider).deleteCustomer(c['id'] as int);
-                              await _load();
-                              if (mounted) showAppSnackBar(context, 'Müştəri silindi');
+                              final name = c['name'] as String? ?? 'Müştəri';
+                              final confirm = await showAppDialog<bool>(
+                                context: context,
+                                title: 'Müştərini sil',
+                                subtitle: 'Müştəri silinəcək',
+                                icon: Icons.delete_outline,
+                                body: Text('“$name” silinsin?', style: Theme.of(context).textTheme.bodyMedium),
+                                actions: [
+                                  OutlinedButton(onPressed: () => Navigator.pop(context, false), child: const Text('Xeyr')),
+                                  FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Sil')),
+                                ],
+                              );
+                              if (confirm != true) return;
+                              try {
+                                await ref.read(posServiceProvider).deleteCustomer(jsonToInt(c['id']));
+                                await _load();
+                                if (mounted) showAppSnackBar(context, 'Müştəri silindi');
+                              } catch (e) {
+                                if (mounted) showAppSnackBar(context, e.toString(), isError: true);
+                              }
                             },
                           );
                         },

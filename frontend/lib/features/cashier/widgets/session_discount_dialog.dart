@@ -149,6 +149,12 @@ class _SessionDiscountFormState extends State<_SessionDiscountForm> {
       );
       return;
     }
+    if (_mode == 'percent' && value > 30) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Kassir üçün maksimum 30%')),
+      );
+      return;
+    }
     Navigator.pop(
       context,
       SessionDiscountResult(
