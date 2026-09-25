@@ -9,5 +9,5 @@ $ServerDbName     = 'psapi_psclub'
 $ServerDbUser     = 'psapi_psclub'
 $ServerDbPassword = 'BURAYA_SIFRE'
 
-# server-setup.php — server .env MIGRATE_KEY ilə eyni olmalıdır
-$ServerMigrateKey = 'BURAYA_MIGRATE_ACARI'
+# Boş buraxsanız build avtomatik gizli açar yaradır və .env-ə yazır
+$ServerMigrateKey = ''

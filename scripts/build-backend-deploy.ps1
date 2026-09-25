@@ -82,7 +82,7 @@ function Copy-BackendTree { param([string]$DestRoot)
     }
 }
 
-function Write-ProductionEnv([string]$Path, [string]$JwtSecret) {
+function Write-ProductionEnv([string]$Path, [string]$JwtSecret, [string]$MigrateKey) {
     @"
 APP_ENV=production
 APP_DEBUG=false
@@ -99,6 +99,7 @@ JWT_SECRET=$JwtSecret
 JWT_TTL=86400
 
 CORS_ORIGIN=https://$WebDomain
+MIGRATE_KEY=$MigrateKey
 "@ | Set-Content -Path $Path -Encoding UTF8 -NoNewline
     Add-Content -Path $Path -Value "" -Encoding UTF8
 }
@@ -153,6 +154,10 @@ if (Test-Path $BackendOut) { Remove-Item $BackendOut -Recurse -Force }
 New-Item -ItemType Directory -Path $BackendOut -Force | Out-Null
 
 $JwtSecret = New-RandomSecret 56
+if (-not (Get-Variable -Name ServerMigrateKey -ErrorAction SilentlyContinue) -or -not $ServerMigrateKey -or $ServerMigrateKey -eq 'BURAYA_MIGRATE_ACARI') {
+    $ServerMigrateKey = New-RandomSecret 40
+    Write-Host "MIGRATE_KEY avtomatik yaradildi (zip .env icinde)." -ForegroundColor Yellow
+}
 
 Write-Step 'composer install (--no-dev)'
 Push-Location $BackendDir
@@ -188,7 +193,7 @@ Get-ChildItem (Join-Path $BackendDir 'database') -Force | Where-Object {
 Copy-Item $installSql (Join-Path $dbInSite 'install.sql') -Force
 
 New-StoragePlaceholders -SiteRoot $siteRoot
-Write-ProductionEnv -Path (Join-Path $siteRoot '.env') -JwtSecret $JwtSecret
+Write-ProductionEnv -Path (Join-Path $siteRoot '.env') -JwtSecret $JwtSecret -MigrateKey $ServerMigrateKey
 
 $publicHtmlFull = Join-Path $BackendOut 'public_html_FULL'
 New-Item -ItemType Directory -Path $publicHtmlFull -Force | Out-Null
