@@ -1,4 +1,6 @@
-/dist/
+/dist/*
+!/dist/psapi-backend.zip
+!/dist/ps-frontend.zip
 /scripts/deploy-config.local.ps1
 /scripts/node_modules/
 /backend/database/install.sql
