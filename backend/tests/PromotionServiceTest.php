@@ -33,6 +33,15 @@ function assertNotNull(?string $value, string $label): void
 assertTrue(DiscountCalculator::amount(10.0, 'percent', 50) === 5.0, 'percent discount');
 assertTrue(DiscountCalculator::amount(10.0, 'fixed', 3) === 3.0, 'fixed discount');
 assertTrue(DiscountCalculator::amount(10.0, 'fixed', 15) === 10.0, 'fixed capped at base');
+assertTrue(PromotionService::encodeValidDays([0]) === '[0]', 'encode keeps Monday=0');
+assertTrue(
+    PromotionService::isWithinTimeWindow(['valid_days' => '[0]'], new DateTimeImmutable('2026-08-17 12:00:00')),
+    'Monday window matches Monday'
+);
+assertTrue(
+    !PromotionService::isWithinTimeWindow(['valid_days' => '[0]'], new DateTimeImmutable('2026-08-18 12:00:00')),
+    'Monday window skips Tuesday'
+);
 
 if (in_array('sqlite', PDO::getAvailableDrivers(), true)) {
     $pdo = new PDO('sqlite::memory:');

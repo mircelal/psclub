@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/api/api_client.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/utils/json_parse.dart';
@@ -9,8 +10,9 @@ import '../../core/widgets/empty_state.dart';
 import '../../services/pos_service.dart';
 import 'widgets/admin_page_layout.dart';
 import 'widgets/customer_groups_panel.dart';
+import 'widgets/spend_discount_panel.dart';
 
-enum DiscountAdminTab { packages, customerGroups }
+enum DiscountAdminTab { packages, customerGroups, spendRules }
 
 /// Bütün endirim növləri — paketlər və müştəri qrupları.
 class DiscountsScreen extends ConsumerStatefulWidget {
@@ -25,6 +27,7 @@ class DiscountsScreen extends ConsumerStatefulWidget {
 class _DiscountsScreenState extends ConsumerState<DiscountsScreen> {
   late DiscountAdminTab _tab;
   final _groupsPanelKey = GlobalKey<CustomerGroupsPanelState>();
+  final _spendPanelKey = GlobalKey<SpendDiscountPanelState>();
 
   List<dynamic> _promotions = [];
   List<String> _tariffNames = [];
@@ -58,6 +61,8 @@ class _DiscountsScreenState extends ConsumerState<DiscountsScreen> {
   void _onPrimaryAction() {
     if (_tab == DiscountAdminTab.customerGroups) {
       _groupsPanelKey.currentState?.showCreateForm();
+    } else if (_tab == DiscountAdminTab.spendRules) {
+      _spendPanelKey.currentState?.showCreateForm();
     } else {
       _showPackageForm();
     }
@@ -74,6 +79,9 @@ class _DiscountsScreenState extends ConsumerState<DiscountsScreen> {
     var isActive = promo?['is_active'] != false;
     final selectedTariffs = <String>{
       ...((promo?['tariff_names'] as List<dynamic>? ?? []).map((e) => e.toString())),
+    };
+    final selectedDays = <int>{
+      ...((promo?['valid_days'] as List<dynamic>? ?? []).map((e) => jsonToInt(e))),
     };
 
     final ok = await showAppDialog<bool>(
@@ -143,6 +151,35 @@ class _DiscountsScreenState extends ConsumerState<DiscountsScreen> {
                     ),
                 ],
                 const SizedBox(height: AppSpacing.lg),
+                Text('Günlər (boş = hər gün)', style: Theme.of(context).textTheme.titleSmall),
+                const SizedBox(height: AppSpacing.sm),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    const _DayChip(0, 'B.E.'),
+                    const _DayChip(1, 'Ç.A.'),
+                    const _DayChip(2, 'Ç.'),
+                    const _DayChip(3, 'C.A.'),
+                    const _DayChip(4, 'C.'),
+                    const _DayChip(5, 'Ş.'),
+                    const _DayChip(6, 'B.'),
+                  ].map((chip) {
+                    final selected = selectedDays.contains(chip.value);
+                    return FilterChip(
+                      label: Text(chip.label),
+                      selected: selected,
+                      onSelected: (v) => setDialogState(() {
+                        if (v) {
+                          selectedDays.add(chip.value);
+                        } else {
+                          selectedDays.remove(chip.value);
+                        }
+                      }),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: AppSpacing.lg),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Aktiv'),
@@ -179,6 +216,8 @@ class _DiscountsScreenState extends ConsumerState<DiscountsScreen> {
       'scope': scope,
       'tariff_names': selectedTariffs.toList(),
       'is_active': isActive,
+      'valid_days': selectedDays.toList(),
+      'valid_hours': <Map<String, String>>[],
     };
 
     try {
@@ -190,7 +229,7 @@ class _DiscountsScreenState extends ConsumerState<DiscountsScreen> {
       await _load();
       if (mounted) showAppSnackBar(context, isEdit ? 'Yeniləndi' : 'Əlavə edildi');
     } catch (e) {
-      if (mounted) showAppSnackBar(context, e.toString(), isError: true);
+      if (mounted) showAppSnackBar(context, ApiClient.messageFromError(e), isError: true);
     }
   }
 
@@ -201,7 +240,7 @@ class _DiscountsScreenState extends ConsumerState<DiscountsScreen> {
       });
       await _load();
     } catch (e) {
-      if (mounted) showAppSnackBar(context, e.toString(), isError: true);
+      if (mounted) showAppSnackBar(context, ApiClient.messageFromError(e), isError: true);
     }
   }
 
@@ -220,12 +259,20 @@ class _DiscountsScreenState extends ConsumerState<DiscountsScreen> {
             label: Text('Müştəri qrupları'),
             icon: Icon(Icons.groups_outlined, size: 18),
           ),
+          ButtonSegment(
+            value: DiscountAdminTab.spendRules,
+            label: Text('Xərc endirimi'),
+            icon: Icon(Icons.savings_outlined, size: 18),
+          ),
         ],
         selected: {_tab},
         onSelectionChanged: (selection) {
           setState(() => _tab = selection.first);
           if (_tab == DiscountAdminTab.customerGroups) {
             _groupsPanelKey.currentState?.reload();
+          }
+          if (_tab == DiscountAdminTab.spendRules) {
+            _spendPanelKey.currentState?.reload();
           }
         },
       ),
@@ -255,6 +302,14 @@ class _DiscountsScreenState extends ConsumerState<DiscountsScreen> {
         final scope = p['scope'] as String? ?? 'all_tables';
         final scopeLabel =
             scope == 'all_tables' ? 'Bütün masalar' : (p['tariff_names'] as List<dynamic>? ?? []).join(', ');
+        final days = (p['valid_days'] as List<dynamic>? ?? []);
+        const dayNames = ['B.E.', 'Ç.A.', 'Ç.', 'C.A.', 'C.', 'Ş.', 'B.'];
+        final dayLabel = days.isEmpty
+            ? 'Hər gün'
+            : days.map((d) {
+                final i = jsonToInt(d);
+                return i >= 0 && i < dayNames.length ? dayNames[i] : '';
+              }).where((s) => s.isNotEmpty).join(', ');
 
         return AdminListTile(
           leading: CircleAvatar(
@@ -266,7 +321,7 @@ class _DiscountsScreenState extends ConsumerState<DiscountsScreen> {
             ),
           ),
           title: p['name'] as String? ?? '',
-          subtitle: '${type == 'percent' ? '${value.toStringAsFixed(0)}%' : '${value.toStringAsFixed(2)} ₼'} · $scopeLabel',
+          subtitle: '${type == 'percent' ? '${value.toStringAsFixed(0)}%' : '${value.toStringAsFixed(2)} ₼'} · $scopeLabel · $dayLabel',
           trailing: Switch(
             value: active,
             onChanged: (_) => _toggleActive(p),
@@ -284,16 +339,19 @@ class _DiscountsScreenState extends ConsumerState<DiscountsScreen> {
   @override
   Widget build(BuildContext context) {
     final isGroups = _tab == DiscountAdminTab.customerGroups;
+    final isSpend = _tab == DiscountAdminTab.spendRules;
 
     return AdminPageLayout(
       title: 'Endirimlər',
       subtitle: isGroups
           ? 'Müştəri qrupları — VIP, tələbə, korporativ'
-          : 'Endirim paketləri — xüsusi gün və tarif endirimləri',
+          : isSpend
+              ? 'Xərc həddinə görə endirim — 100 manatdan çox, bu ay, 10%'
+              : 'Endirim paketləri — xüsusi gün və tarif endirimləri',
       action: FilledButton.icon(
         onPressed: _onPrimaryAction,
         icon: Icon(isGroups ? Icons.group_add_outlined : Icons.add, size: 20),
-        label: Text(isGroups ? 'Qrup əlavə et' : 'Paket əlavə et'),
+        label: Text(isGroups ? 'Qrup əlavə et' : (isSpend ? 'Qayda əlavə et' : 'Paket əlavə et')),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -302,12 +360,20 @@ class _DiscountsScreenState extends ConsumerState<DiscountsScreen> {
           Expanded(
             child: isGroups
                 ? CustomerGroupsPanel(key: _groupsPanelKey)
-                : _packagesBody(),
+                : isSpend
+                    ? SpendDiscountPanel(key: _spendPanelKey)
+                    : _packagesBody(),
           ),
         ],
       ),
     );
   }
+}
+
+class _DayChip {
+  const _DayChip(this.value, this.label);
+  final int value;
+  final String label;
 }
 
 /// Geriyə uyğunluq.

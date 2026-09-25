@@ -47,6 +47,7 @@ class _ShiftDetailDialogState extends ConsumerState<_ShiftDetailDialog> {
   String? _error;
   _ShiftActivityFilter _filter = _ShiftActivityFilter.all;
   final Set<int> _expandedSessions = {};
+  final Set<int> _expandedMovements = {};
 
   @override
   void initState() {
@@ -197,6 +198,10 @@ class _ShiftDetailDialogState extends ConsumerState<_ShiftDetailDialog> {
                       '${shift['opened_by_name'] ?? '—'} · ${shift['opened_at']}${isOpen ? '' : ' — ${shift['closed_at'] ?? ''}'}',
                       style: CashierTheme.caption(context).copyWith(fontSize: 13),
                     ),
+                    if ((shift['notes']?.toString().trim().isNotEmpty ?? false) && !isOpen) ...[
+                      const SizedBox(height: 6),
+                      Text('Qeyd: ${shift['notes']}', style: CashierTheme.caption(context)),
+                    ],
                     const SizedBox(height: 6),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -299,13 +304,29 @@ class _ShiftDetailDialogState extends ConsumerState<_ShiftDetailDialog> {
                     final row = entry.row;
                     final kind = row['kind'] as String? ?? '';
                     final isDeleted = kind == 'order_deleted';
+                    final isMovement = kind == 'cash_movement';
+                    final movementId = jsonToInt(row['movement_id']);
                     return _ActivityTile(
                       sequenceIndex: entry.index,
                       row: row,
                       timeFmt: timeFmt,
-                      expanded: (kind == 'session' || isDeleted) &&
-                          _expandedSessions.contains(jsonToInt(row['session_id'])),
+                      expanded: isMovement
+                          ? _expandedMovements.contains(movementId)
+                          : (kind == 'session' || isDeleted) &&
+                              _expandedSessions.contains(jsonToInt(row['session_id'])),
                       onTap: () {
+                        if (isMovement) {
+                          final lines = row['lines'] as List<dynamic>? ?? [];
+                          if (lines.isEmpty) return;
+                          setState(() {
+                            if (_expandedMovements.contains(movementId)) {
+                              _expandedMovements.remove(movementId);
+                            } else {
+                              _expandedMovements.add(movementId);
+                            }
+                          });
+                          return;
+                        }
                         if (kind == 'session' || isDeleted) {
                           final sid = jsonToInt(row['session_id']);
                           final lines = row['lines'] as List<dynamic>? ?? [];
@@ -579,7 +600,7 @@ class _ActivityTile extends StatelessWidget {
                         color: showAmount ? visual.amount : visual.accent,
                       ),
                     ),
-                  if ((kind == 'session' || isDeleted) && lines.isNotEmpty) ...[
+                  if ((kind == 'session' || isDeleted || kind == 'cash_movement') && lines.isNotEmpty) ...[
                     const SizedBox(width: 4),
                     Icon(
                       expanded ? Icons.expand_less : Icons.expand_more,

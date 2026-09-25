@@ -13,8 +13,11 @@ use App\Support\ApiResponse;
 use App\Support\BusinessBillingColumns;
 use App\Support\BillingCalculator;
 use App\Support\DatabaseClock;
+use App\Support\DbSchema;
 use App\Support\DiscountCalculator;
+use App\Support\LoyaltyService;
 use App\Support\PromotionService;
+use App\Support\SessionCloseRules;
 use PDO;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -31,6 +34,7 @@ final class SessionsController
         private readonly SessionSetsController $sessionSets,
         private readonly ShiftService $shifts,
         private readonly PromotionService $promotions,
+        private readonly LoyaltyService $loyalty,
     ) {
     }
 
@@ -235,7 +239,11 @@ final class SessionsController
         $base = $appliesTo === 'time_only' ? $timeCharge : $subtotal;
 
         if ($type !== 'none') {
-            $limitError = $this->promotions->validateManualDiscount($user, $type, $value, $base);
+            $isGift = ($session['session_type'] ?? 'table') === 'counter'
+                && $type === 'percent'
+                && $value >= 100
+                && $appliesTo === 'all';
+            $limitError = $this->promotions->validateManualDiscount($user, $type, $value, $base, $isGift);
             if ($limitError !== null) {
                 return ApiResponse::error($limitError, 422);
             }
@@ -641,6 +649,24 @@ final class SessionsController
         $closedAt = $this->clock->now();
         $bill = $this->calculateBill($session, closingAt: $closedAt);
 
+        $redeemMinutes = max(0, (int) ($body['redeem_bonus_minutes'] ?? 0));
+        $redeemWallet = max(0, (float) ($body['redeem_bonus_wallet'] ?? 0));
+        $customerId = (int) ($session['customer_id'] ?? 0);
+        if (($redeemMinutes > 0 || $redeemWallet > 0) && $customerId <= 0) {
+            return ApiResponse::error('Bonus üçün müştəri təyin edilməlidir', 422);
+        }
+        if (($redeemMinutes > 0 || $redeemWallet > 0) && !$this->loyalty->tablesExist()) {
+            return ApiResponse::error('Loyallıq cədvəlləri mövcud deyil — miqrasiya işlədin', 503);
+        }
+        $balance = $customerId > 0 ? $this->loyalty->getBalance($customerId) : null;
+        $bill = $this->loyalty->applyBonusToBill(
+            $bill,
+            $redeemMinutes,
+            $redeemWallet,
+            (float) ($session['hourly_rate_snapshot'] ?? 0),
+            $balance
+        );
+
         $cash = (float) ($body['cash_amount'] ?? 0);
         $card = (float) ($body['card_amount'] ?? 0);
         $total = (float) $bill['total_amount'];
@@ -657,13 +683,31 @@ final class SessionsController
             return ApiResponse::error('Payment amounts do not match total', 422);
         }
 
+        $bonusUsed = (int) ($bill['bonus_minutes_used'] ?? 0) > 0 || (float) ($bill['bonus_wallet_used'] ?? 0) > 0;
+        if ($bonusUsed && !DbSchema::hasColumn($this->pdo, 'sessions', 'bonus_wallet_used')) {
+            return ApiResponse::error('Bonus ödənişi üçün miqrasiya işlədin', 503);
+        }
+
         $isCounter = ($session['session_type'] ?? 'table') === 'counter';
         if ($isCounter) {
             $itemStmt = $this->pdo->prepare('SELECT COUNT(*) FROM session_items WHERE session_id = ?');
             $itemStmt->execute([$sessionId]);
             $itemCount = (int) $itemStmt->fetchColumn();
-            if ($itemCount > 0 && round($total, 2) <= 0) {
-                return ApiResponse::error('Səbətdə məhsul var — əvvəlcə səbəti təmizləyin və ya ödəniş alın', 422);
+            $giftNote = trim((string) ($body['gift_note'] ?? ''));
+            $zeroError = SessionCloseRules::counterZeroTotalError(
+                $itemCount,
+                $total,
+                (float) $bill['discount'],
+                (float) ($bill['bonus_wallet_used'] ?? 0),
+                (int) ($bill['bonus_minutes_used'] ?? 0),
+                $giftNote
+            );
+            if ($zeroError !== null) {
+                return ApiResponse::error($zeroError, 422);
+            }
+            $hasGift = (float) $bill['discount'] > 0 && round($total, 2) <= 0 && $giftNote !== '';
+            if ($hasGift && !DbSchema::hasColumn($this->pdo, 'sessions', 'gift_note')) {
+                return ApiResponse::error('Hədiyyə qeydi üçün miqrasiya işlədin', 503);
             }
             if ($itemCount > 0 && round($cash + $card, 2) < round($total, 2)) {
                 return ApiResponse::error('Birbaşa satış üçün tam ödəniş tələb olunur', 422);
@@ -672,11 +716,17 @@ final class SessionsController
 
         $this->pdo->beginTransaction();
         try {
-            $this->pdo->prepare(
-                'UPDATE sessions SET status = \'closed\', closed_at = ?, closed_by = ?,
-                 time_charge = ?, products_total = ?, discount = ?, total_amount = ?, active_seconds = ?, updated_at = NOW()
-                 WHERE id = ?'
-            )->execute([
+            $sets = [
+                "status = 'closed'",
+                'closed_at = ?',
+                'closed_by = ?',
+                'time_charge = ?',
+                'products_total = ?',
+                'discount = ?',
+                'total_amount = ?',
+                'active_seconds = ?',
+            ];
+            $closeParams = [
                 $closedAt,
                 (int) $user['id'],
                 $bill['time_charge'],
@@ -684,8 +734,23 @@ final class SessionsController
                 $bill['discount'],
                 $total,
                 $bill['active_seconds'],
-                $sessionId,
-            ]);
+            ];
+            if (DbSchema::hasColumn($this->pdo, 'sessions', 'bonus_minutes_used')) {
+                $sets[] = 'bonus_minutes_used = ?';
+                $sets[] = 'bonus_wallet_used = ?';
+                $closeParams[] = (int) ($bill['bonus_minutes_used'] ?? 0);
+                $closeParams[] = (float) ($bill['bonus_wallet_used'] ?? 0);
+            }
+            if (DbSchema::hasColumn($this->pdo, 'sessions', 'gift_note')) {
+                $sets[] = 'gift_note = ?';
+                $giftNoteToStore = trim((string) ($body['gift_note'] ?? ''));
+                $closeParams[] = $giftNoteToStore !== '' ? $giftNoteToStore : null;
+            }
+            $sets[] = 'updated_at = NOW()';
+            $closeParams[] = $sessionId;
+            $this->pdo->prepare(
+                'UPDATE sessions SET ' . implode(', ', $sets) . ' WHERE id = ?'
+            )->execute($closeParams);
 
             $this->pdo->prepare(
                 'INSERT INTO payments (session_id, shift_id, method, cash_amount, card_amount, total_amount, created_at)
@@ -695,6 +760,16 @@ final class SessionsController
             if (!empty($session['table_id'])) {
                 $this->pdo->prepare("UPDATE tables SET status = 'empty', updated_at = NOW() WHERE id = ?")
                     ->execute([$session['table_id']]);
+            }
+
+            if ($customerId > 0) {
+                $this->loyalty->commitRedemption(
+                    $customerId,
+                    $sessionId,
+                    (int) ($bill['bonus_minutes_used'] ?? 0),
+                    (float) ($bill['bonus_wallet_used'] ?? 0),
+                    (int) $user['id']
+                );
             }
 
             if (!empty($session['coupon_id']) && (float) $bill['discount'] > 0) {
@@ -815,6 +890,9 @@ final class SessionsController
         if (($session['session_type'] ?? 'table') === 'counter' && empty($session['table_name'])) {
             $session['table_name'] = 'Kassa satışı';
         }
+        $bonus = $this->loyalty->getBalance((int) ($session['customer_id'] ?? 0));
+        $session['customer_bonus_minutes'] = $bonus['bonus_minutes'];
+        $session['customer_bonus_wallet'] = $bonus['bonus_wallet'];
         return $session;
     }
 
@@ -866,12 +944,14 @@ final class SessionsController
         $discount = $resolved['amount'];
         $promotion = $resolved['promotion'];
         $customerGroup = $resolved['customer_group'];
+        $spendRule = $resolved['spend_rule'] ?? null;
         $displayCustomerGroup = $this->promotions->displayCustomerGroup($session);
         if ($discountType !== 'none') {
             $base = $discountAppliesTo === 'time_only' ? $timeCharge : $subtotal;
             $discount = DiscountCalculator::amount($base, $discountType, (float) ($session['discount_value'] ?? 0));
             $promotion = null;
             $customerGroup = null;
+            $spendRule = null;
         }
         $discountValue = (float) ($session['discount_value'] ?? 0);
         $total = round($subtotal - $discount, 2);
@@ -910,6 +990,7 @@ final class SessionsController
             'customer_group_discount_value' => $customerGroup ? (float) $customerGroup['discount_value'] : null,
             'customer_group_applies_to' => $customerGroup ? (string) ($customerGroup['applies_to'] ?? 'time_only') : null,
             'active_customer_group' => $displayCustomerGroup,
+            'spend_rule_name' => $spendRule ? (string) ($spendRule['name'] ?? '') : null,
             'coupon_code' => $session['coupon_code'] ?? null,
             'total_amount' => $total,
             'items' => $items,

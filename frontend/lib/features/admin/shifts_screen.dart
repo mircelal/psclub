@@ -258,11 +258,12 @@ class _MovementsList extends StatelessWidget {
         final type = m['type'] as String? ?? '';
         final amt = jsonToDouble(m['amount']);
         final source = m['source'] == 'admin' ? 'Admin' : 'Kassir';
+        final description = (m['description'] as String?)?.trim() ?? '';
 
         return ListTile(
           title: Text(labelFor(type, m['category'] as String?)),
           subtitle: Text(
-            '${m['created_at']} · $source${m['created_by_name'] != null ? ' · ${m['created_by_name']}' : ''}',
+            '${m['created_at']} · $source${m['created_by_name'] != null ? ' · ${m['created_by_name']}' : ''}${description.isNotEmpty ? ' · $description' : ''}',
             style: CashierTheme.caption(context),
           ),
           trailing: Text(

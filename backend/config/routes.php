@@ -10,6 +10,8 @@ use App\Modules\Auth\AuthController;
 use App\Modules\Coupons\CouponsController;
 use App\Modules\Customers\CustomerGroupsController;
 use App\Modules\Customers\CustomersController;
+use App\Modules\Loyalty\LoyaltyController;
+use App\Modules\Promotions\SpendDiscountsController;
 use App\Modules\Orders\OrdersController;
 use App\Modules\Promotions\PromotionsController;
 use App\Modules\Products\ProductMediaController;
@@ -127,8 +129,19 @@ return function (App $app): void {
 
             $admin->get('/customer-groups', [CustomerGroupsController::class, 'index']);
             $admin->post('/customer-groups', [CustomerGroupsController::class, 'store']);
+            $admin->get('/customer-groups/{id}/members', [CustomerGroupsController::class, 'members']);
+            $admin->post('/customer-groups/{id}/members', [CustomerGroupsController::class, 'changeMembers']);
             $admin->put('/customer-groups/{id}', [CustomerGroupsController::class, 'update']);
             $admin->delete('/customer-groups/{id}', [CustomerGroupsController::class, 'destroy']);
+
+            $admin->get('/spend-discount-rules', [SpendDiscountsController::class, 'index']);
+            $admin->post('/spend-discount-rules', [SpendDiscountsController::class, 'store']);
+            $admin->put('/spend-discount-rules/{id}', [SpendDiscountsController::class, 'update']);
+            $admin->delete('/spend-discount-rules/{id}', [SpendDiscountsController::class, 'destroy']);
+
+            $admin->get('/customers/{id}/loyalty', [LoyaltyController::class, 'show']);
+            $admin->post('/customers/{id}/loyalty/grant', [LoyaltyController::class, 'grant']);
+            $admin->post('/customers/{id}/loyalty/adjust', [LoyaltyController::class, 'adjust']);
 
             $admin->get('/customers/{id}', [CustomersController::class, 'show']);
             $admin->put('/customers/{id}', [CustomersController::class, 'update']);
