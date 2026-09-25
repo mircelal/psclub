@@ -12,6 +12,41 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+# Windows PowerShell 5.1 '\' ayırıcını özü başa düşür.
+# PowerShell 7 Linux/macOS-da isə '\' fayl adının hissəsi sayılır — eyni skript hər iki tərəfdə işləsin.
+$Script:IsWindowsHost = ($PSVersionTable.PSVersion.Major -lt 6) -or $IsWindows
+if (-not $Script:IsWindowsHost) {
+    $Script:JoinPathCmdlet = Get-Command -Name Join-Path -CommandType Cmdlet
+    function Join-Path {
+        [CmdletBinding()]
+        param(
+            [Parameter(Mandatory = $true, Position = 0)]
+            [AllowEmptyString()]
+            [string[]]$Path,
+            [Parameter(Mandatory = $true, Position = 1)]
+            [AllowEmptyString()]
+            [string[]]$ChildPath,
+            [Parameter()]
+            [AllowEmptyString()]
+            [string[]]$AdditionalChildPath,
+            [switch]$Resolve
+        )
+        $normalize = {
+            param($Value)
+            if ($null -eq $Value -or $Value -eq '') { return $Value }
+            return ($Value -replace '\\', [IO.Path]::DirectorySeparatorChar)
+        }
+        $Path = @($Path | ForEach-Object { & $normalize $_ })
+        $ChildPath = @($ChildPath | ForEach-Object { & $normalize $_ })
+        $params = @{ Path = $Path; ChildPath = $ChildPath }
+        if ($PSBoundParameters.ContainsKey('AdditionalChildPath')) {
+            $params.AdditionalChildPath = @($AdditionalChildPath | ForEach-Object { & $normalize $_ })
+        }
+        if ($Resolve) { $params.Resolve = $true }
+        & $Script:JoinPathCmdlet @params
+    }
+}
+
 # ─── Konfiqurasiya (deploy-config.local.ps1 ilə override) ───────────────────
 $ApiDomain      = 'psapi.sayt.cam'
 $WebDomain      = 'ps.sayt.cam'
@@ -57,14 +92,27 @@ function Write-Step([string]$Message) {
     Write-Host "`n==> $Message" -ForegroundColor Cyan
 }
 
+function Test-UsablePath([string]$Path) {
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+    if (-not $Script:IsWindowsHost -and $Path -match '^[A-Za-z]:[\\/]') { return $false }
+    try {
+        return (Test-Path -LiteralPath $Path)
+    } catch {
+        return $false
+    }
+}
+
 function Find-LaragonRoot {
-    $candidates = @(
-        'C:\laragon',
-        (Join-Path $env:USERPROFILE 'laragon'),
-        (Join-Path $env:USERPROFILE 'Laragon')
-    )
+    if (-not $Script:IsWindowsHost) { return $null }
+    $candidates = @('C:\laragon')
+    if ($env:USERPROFILE) {
+        $candidates += @(
+            (Join-Path $env:USERPROFILE 'laragon'),
+            (Join-Path $env:USERPROFILE 'Laragon')
+        )
+    }
     foreach ($c in $candidates) {
-        if (Test-Path (Join-Path $c 'bin\php')) { return $c }
+        if (Test-UsablePath (Join-Path $c 'bin\php')) { return $c }
     }
     return $null
 }
@@ -75,7 +123,7 @@ function Find-Executable([string[]]$Names, [string[]]$SearchRoots) {
         if ($cmd) { return $cmd.Source }
     }
     foreach ($root in $SearchRoots) {
-        if (-not $root -or -not (Test-Path $root)) { continue }
+        if (-not (Test-UsablePath $root)) { continue }
         foreach ($name in $Names) {
             $found = Get-ChildItem -Path $root -Filter $name -Recurse -ErrorAction SilentlyContinue |
                 Select-Object -First 1 -ExpandProperty FullName
@@ -83,6 +131,37 @@ function Find-Executable([string[]]$Names, [string[]]$SearchRoots) {
         }
     }
     return $null
+}
+
+function Copy-AllItems {
+    param([string]$Source, [string]$Dest)
+    Get-ChildItem -LiteralPath $Source -Force | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $Dest $_.Name) -Recurse -Force
+    }
+}
+
+function Compress-DirectoryContents {
+    param([string]$Source, [string]$Destination)
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    if (Test-Path $Destination) { Remove-Item $Destination -Force }
+    $zip = [System.IO.Compression.ZipFile]::Open($Destination, [System.IO.Compression.ZipArchiveMode]::Create)
+    try {
+        $root = (Resolve-Path -LiteralPath $Source).Path
+        $sep = [IO.Path]::DirectorySeparatorChar
+        if (-not $root.EndsWith($sep)) { $root += $sep }
+        Get-ChildItem -LiteralPath $Source -Recurse -Force -File | ForEach-Object {
+            $rel = ($_.FullName.Substring($root.Length) -replace '\\', '/')
+            [void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                $zip,
+                $_.FullName,
+                $rel,
+                [System.IO.Compression.CompressionLevel]::Optimal
+            )
+        }
+    } finally {
+        $zip.Dispose()
+    }
 }
 
 function New-RandomSecret([int]$Length = 48) {
@@ -209,7 +288,7 @@ PS Club Web — DirectAdmin quraşdırma
 }
 
 function New-SpaHtaccess([string]$Dir) {
-    @"
+    $content = @"
 RewriteEngine On
 
 # Köhnə Flutter SW — Chrome-da donmuş köhnə bundle qaytarır
@@ -227,7 +306,10 @@ RewriteRule ^ index.html [L]
     Header set Expires "0"
   </FilesMatch>
 </IfModule>
-"@ | Set-Content -Path (Join-Path $Dir '.htaccess') -Encoding ASCII
+"@
+    $htaccessPath = Join-Path $Dir '.htaccess'
+    $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($htaccessPath, $content, $utf8NoBom)
 }
 
 function Read-DotEnvFile([string]$Path) {
@@ -278,22 +360,26 @@ $Laragon = Find-LaragonRoot
 $SearchRoots = @()
 if ($Laragon) { $SearchRoots += $Laragon }
 
-$PhpExe = Find-Executable @('php.exe') @(
+$phpSearch = @(
     $(if ($Laragon) { Join-Path $Laragon 'bin\php' }),
     'C:\laragon\bin\php',
     'C:\xampp\php'
 )
-$ComposerExe = Find-Executable @('composer.bat', 'composer.phar', 'composer') @(
-    $(if ($Laragon) { Join-Path $Laragon 'bin\composer' }),
-    (Join-Path $env:APPDATA 'Composer\vendor\bin')
-)
-$FlutterExe = Find-Executable @('flutter.bat', 'flutter') @(
-    $(Join-Path $env:LOCALAPPDATA 'flutter\bin'),
-    'C:\flutter\bin',
-    'C:\src\flutter\bin'
-)
+$composerSearch = @()
+if ($Laragon) { $composerSearch += (Join-Path $Laragon 'bin\composer') }
+if ($env:APPDATA) { $composerSearch += (Join-Path $env:APPDATA 'Composer\vendor\bin') }
+$flutterSearch = @('C:\flutter\bin', 'C:\src\flutter\bin')
+if ($env:LOCALAPPDATA) {
+    $flutterSearch = @(Join-Path $env:LOCALAPPDATA 'flutter\bin') + $flutterSearch
+}
+$flutterNames = @('flutter.bat', 'flutter')
+if (-not $Script:IsWindowsHost) { $flutterNames = @('flutter') }
 
-if (-not $PhpExe) { throw 'php.exe tapılmadı. Laragon və ya PHP PATH-ə əlavə edin.' }
+$PhpExe = Find-Executable @('php.exe', 'php') $phpSearch
+$ComposerExe = Find-Executable @('composer.bat', 'composer.phar', 'composer') $composerSearch
+$FlutterExe = Find-Executable $flutterNames $flutterSearch
+
+if (-not $PhpExe) { throw 'php tapılmadı. Laragon və ya PHP PATH-ə əlavə edin.' }
 if (-not $ComposerExe) { throw 'composer tapılmadı.' }
 if (-not $FlutterExe) { throw 'flutter tapılmadı. Flutter SDK PATH-ə əlavə edin.' }
 
@@ -327,7 +413,7 @@ New-Item -ItemType Directory -Path $publicHtml -Force | Out-Null
 
 Copy-BackendTree -DestRoot $siteRoot
 Copy-Item (Join-Path $BackendDir 'vendor') (Join-Path $siteRoot 'vendor') -Recurse -Force
-Copy-Item (Join-Path $BackendDir 'public\*') $publicHtml -Recurse -Force
+Copy-AllItems -Source (Join-Path $BackendDir 'public') -Dest $publicHtml
 Get-ChildItem -Path $publicHtml -Filter '*.php' -File | Where-Object {
     $Script:BackendPublicSetupExclude -contains $_.Name
 } | Remove-Item -Force
@@ -347,8 +433,8 @@ New-StoragePlaceholders -SiteRoot $siteRoot
 # Asan upload: hamısı bir public_html-də
 $publicHtmlFull = Join-Path $BackendOut 'public_html_FULL'
 New-Item -ItemType Directory -Path $publicHtmlFull -Force | Out-Null
-Copy-Item (Join-Path $siteRoot '*') $publicHtmlFull -Recurse -Force
-Copy-Item (Join-Path $publicHtml '*') $publicHtmlFull -Recurse -Force
+Copy-AllItems -Source $siteRoot -Dest $publicHtmlFull
+Copy-AllItems -Source $publicHtml -Dest $publicHtmlFull
 
 Remove-BackendSetupFiles -Roots @($publicHtml, $publicHtmlFull, $siteRoot)
 
@@ -360,8 +446,7 @@ storage/ qovluğu serverdə chmod 775 (və ya 755) olmalıdır.
 '@ | Add-Content -Path (Join-Path $BackendOut 'OXU-BUNU.txt') -Encoding UTF8
 
 Write-Step 'Backend: zip'
-if (Test-Path $BackendZip) { Remove-Item $BackendZip -Force }
-Compress-Archive -Path (Join-Path $BackendOut '*') -DestinationPath $BackendZip -CompressionLevel Optimal
+Compress-DirectoryContents -Source $BackendOut -Destination $BackendZip
 
 # ─── FRONTEND ────────────────────────────────────────────────────────────────
 Write-Step 'Frontend: flutter pub get'
@@ -393,15 +478,14 @@ if (-not (Test-Path (Join-Path $webBuild 'index.html'))) {
 Write-Step 'Frontend: public_html + .htaccess'
 $fePublic = Join-Path $FrontendOut 'public_html'
 New-Item -ItemType Directory -Path $fePublic -Force | Out-Null
-Copy-Item (Join-Path $webBuild '*') $fePublic -Recurse -Force
+Copy-AllItems -Source $webBuild -Dest $fePublic
 $swFile = Join-Path $fePublic 'flutter_service_worker.js'
 if (Test-Path $swFile) { Remove-Item $swFile -Force }
 New-SpaHtaccess -Dir $fePublic
 Write-DeployReadme -Path (Join-Path $FrontendOut 'OXU-BUNU.txt') -Kind 'frontend'
 
 Write-Step 'Frontend: zip'
-if (Test-Path $FrontendZip) { Remove-Item $FrontendZip -Force }
-Compress-Archive -Path (Join-Path $FrontendOut '*') -DestinationPath $FrontendZip -CompressionLevel Optimal
+Compress-DirectoryContents -Source $FrontendOut -Destination $FrontendZip
 
 # Staging sil (yalnız zip qalsın)
 Remove-Item $BackendOut -Recurse -Force
