@@ -144,11 +144,13 @@ final class ShiftService
 
         $sessStmt = $this->pdo->prepare(
             'SELECT s.id, s.session_type, s.closed_at, s.time_charge, s.products_total,
-                    s.discount, s.total_amount, s.table_id,
+                    s.discount, s.total_amount, s.table_id, s.closed_by,
                     t.name AS table_name,
+                    COALESCE(cu.full_name, cu.username) AS closed_by_name,
                     p.method AS payment_method, p.cash_amount, p.card_amount, p.created_at AS paid_at
              FROM sessions s
              LEFT JOIN tables t ON t.id = s.table_id
+             LEFT JOIN users cu ON cu.id = s.closed_by
              JOIN payments p ON p.session_id = s.id
              WHERE s.business_id = ?
                AND s.status = \'closed\'
@@ -190,6 +192,7 @@ final class ShiftService
                 'sign' => '+',
                 'session_id' => $sessionId,
                 'session_type' => (string) ($session['session_type'] ?? 'table'),
+                'closed_by_name' => $session['closed_by_name'] ?? null,
                 'lines' => $formatted['lines'],
             ];
         }
@@ -349,6 +352,10 @@ final class ShiftService
         }
         if ($payParts !== []) {
             $lines[] = ['label' => 'Ödəniş: ' . implode(' · ', $payParts), 'amount' => null];
+        }
+        $closedByName = trim((string) ($session['closed_by_name'] ?? ''));
+        if ($closedByName !== '') {
+            $lines[] = ['label' => 'Kassir: ' . $closedByName, 'amount' => null];
         }
 
         return ['title' => $title, 'lines' => $lines];

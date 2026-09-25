@@ -44,6 +44,7 @@ final class ShiftsController
 
         $payload = $this->shifts->enrichShift($shift);
         $payload['open'] = true;
+        $payload['activity'] = $this->shifts->getShiftActivity($shift);
 
         return ApiResponse::success($payload);
     }

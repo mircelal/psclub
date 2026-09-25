@@ -3,6 +3,8 @@ import '../../../core/config/business_config_provider.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/cashier_theme.dart';
 import '../../../core/widgets/business_logo.dart';
+import '../../../core/utils/json_parse.dart';
+import '../open_counter_sessions_provider.dart';
 import 'cashier_filter_bar.dart';
 import 'cashier_stats_row.dart';
 import 'shift_rail_card.dart';
@@ -31,6 +33,9 @@ class CashierSideRail extends StatelessWidget {
     this.onCashIn,
     this.onCashOut,
     this.onCloseShift,
+    this.onTodaySales,
+    this.openCounterSales = const [],
+    this.onOpenCounterSale,
   });
 
   final BusinessConfig biz;
@@ -53,6 +58,9 @@ class CashierSideRail extends StatelessWidget {
   final VoidCallback? onCashIn;
   final VoidCallback? onCashOut;
   final VoidCallback? onCloseShift;
+  final VoidCallback? onTodaySales;
+  final List<Map<String, dynamic>> openCounterSales;
+  final ValueChanged<int>? onOpenCounterSale;
 
   /// Drawer içində — eni parent-ə uyğun.
   final bool inDrawer;
@@ -110,7 +118,60 @@ class CashierSideRail extends StatelessWidget {
                         onCashIn: onCashIn,
                         onCashOut: onCashOut,
                         onCloseShift: onCloseShift ?? () {},
+                        onTodaySales: onTodaySales,
                       ),
+                    ],
+                    if (openCounterSales.isNotEmpty && onOpenCounterSale != null) ...[
+                      const SizedBox(height: AppSpacing.md),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+                        child: Text('AÇIQ SATIŞLAR', style: CashierTheme.sectionTitle(context)),
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      ...openCounterSales.map((s) {
+                        final id = jsonToInt(s['id']);
+                        final items = counterSessionItemCount(s);
+                        final total = counterSessionPayable(s);
+                        final stale = s['is_stale_counter'] == true;
+                        return Padding(
+                          padding: const EdgeInsets.fromLTRB(AppSpacing.lg, 0, AppSpacing.lg, 6),
+                          child: Material(
+                            color: stale
+                                ? Theme.of(context).colorScheme.error.withValues(alpha: 0.08)
+                                : CashierTheme.surfaceSecondary(context),
+                            borderRadius: BorderRadius.circular(CashierTheme.radiusCard),
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(CashierTheme.radiusCard),
+                              onTap: () => onOpenCounterSale!(id),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      stale ? Icons.warning_amber_rounded : Icons.shopping_bag_outlined,
+                                      size: 18,
+                                      color: stale
+                                          ? Theme.of(context).colorScheme.error
+                                          : CashierTheme.accent(context),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        '#$id · $items məhsul · ${total.toStringAsFixed(2)} ₼',
+                                        style: CashierTheme.caption(context).copyWith(
+                                          color: stale ? Theme.of(context).colorScheme.error : null,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                    Icon(Icons.chevron_right, size: 18, color: CashierTheme.textTertiary(context)),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      }),
                     ],
                     const SizedBox(height: AppSpacing.lg),
                     Padding(

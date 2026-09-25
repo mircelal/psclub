@@ -613,11 +613,12 @@ final class SessionsController
             $currentPlanned = max($timing['min_open_minutes'], $activeMinutes);
         }
 
-        $maxPlanned = 180;
+        // Açılış max 180 dəq; uzatma ilə cəmi 24 saata qədər (1440 dəq). UI gizlətmir.
+        $maxPlanned = 1440;
         $newPlanned = $currentPlanned + $add;
         if ($newPlanned > $maxPlanned) {
             return ApiResponse::error(
-                'Maksimum planlaşdırılmış müddət ' . $maxPlanned . ' dəqiqədir',
+                'Maksimum planlaşdırılmış müddət ' . $maxPlanned . ' dəqiqədir (24 saat)',
                 422,
                 ['code' => 'max_planned_minutes', 'max' => $maxPlanned]
             );
@@ -1120,6 +1121,22 @@ final class SessionsController
         if (($session['session_type'] ?? 'table') === 'counter' && empty($session['table_name'])) {
             $session['table_name'] = 'Kassa satışı';
         }
+
+        // Açıq birbaşa satış: məhsullu və uzun müddət toxunulmamış — silinmir, UI-də işarələnir.
+        $session['is_stale_counter'] = false;
+        if (
+            ($session['session_type'] ?? 'table') === 'counter'
+            && in_array((string) ($session['status'] ?? ''), ['active', 'paused'], true)
+            && empty($session['table_id'])
+        ) {
+            $itemCount = count($session['items'] ?? []);
+            $refAt = (string) ($session['updated_at'] ?? $session['opened_at'] ?? '');
+            $staleCutoff = strtotime('-6 hours');
+            if ($itemCount > 0 && $refAt !== '' && strtotime($refAt) !== false && strtotime($refAt) < $staleCutoff) {
+                $session['is_stale_counter'] = true;
+            }
+        }
+
         return $session;
     }
 

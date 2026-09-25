@@ -7,8 +7,11 @@ import '../../core/theme/brand_colors.dart';
 import '../../core/theme/app_palette.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/utils/json_parse.dart';
+import '../../core/widgets/app_snackbar.dart';
 import '../../core/widgets/money_text.dart';
 import '../../services/pos_service.dart';
+import '../cashier/open_counter_sessions_provider.dart';
+import '../cashier/show_session_panel.dart';
 import 'widgets/admin_page_layout.dart';
 
 class DashboardScreen extends ConsumerStatefulWidget {
@@ -46,6 +49,79 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       _data = null;
     }
     if (mounted && seq == _loadSeq) setState(() => _loading = false);
+  }
+
+  Future<void> _showOpenCounterSalesDialog() async {
+    try {
+      final raw = await ref.read(posServiceProvider).getActiveSessions();
+      if (!mounted) return;
+      final sessions = raw
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .where((s) {
+            final type = s['session_type'] as String? ?? 'table';
+            return type == 'counter' || s['table_id'] == null;
+          })
+          .toList();
+      if (!mounted) return;
+      final hostContext = context;
+      await showDialog<void>(
+        context: hostContext,
+        builder: (ctx) => AlertDialog(
+          title: Text('Açıq birbaşa satışlar (${sessions.length})'),
+          content: SizedBox(
+            width: 480,
+            child: sessions.isEmpty
+                ? const Text('Hazırda açıq birbaşa satış yoxdur.')
+                : ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: sessions.length,
+                    separatorBuilder: (_, _) => const Divider(height: 1),
+                    itemBuilder: (_, i) {
+                      final s = sessions[i];
+                      final id = jsonToInt(s['id']);
+                      final items = counterSessionItemCount(s);
+                      final total = counterSessionPayable(s);
+                      final stale = s['is_stale_counter'] == true;
+                      final opened = s['opened_at']?.toString() ?? '';
+                      return ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: Icon(
+                          stale ? Icons.warning_amber_rounded : Icons.shopping_bag_outlined,
+                          color: stale ? Theme.of(ctx).colorScheme.error : null,
+                        ),
+                        title: Text('Satış #$id${stale ? ' · Köhnə' : ''}'),
+                        subtitle: Text(
+                          '$items məhsul · ${total.toStringAsFixed(2)} ₼'
+                          '${opened.isNotEmpty ? '\n$opened' : ''}',
+                        ),
+                        isThreeLine: opened.isNotEmpty,
+                        trailing: const Icon(Icons.open_in_new, size: 18),
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          showSessionPanel(
+                            hostContext,
+                            ref,
+                            id,
+                            () {
+                              ref.read(openCounterSessionsProvider.notifier).refresh();
+                              _load();
+                            },
+                            lockUntilSettled: true,
+                          );
+                        },
+                      );
+                    },
+                  ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Bağla')),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (mounted) showAppSnackBar(this.context, e.toString(), isError: true);
+    }
   }
 
   Future<void> _pickRange() async {
@@ -110,11 +186,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     return ListView(
       padding: const EdgeInsets.all(AppSpacing.xxl),
       children: [
-        if (activeTable > 0 || activeCounter > 0) _ActiveSessionsBanner(
-          tableCount: activeTable,
-          counterCount: activeCounter,
-          palette: p,
-        ),
+        if (activeTable > 0 || activeCounter > 0)
+          _ActiveSessionsBanner(
+            tableCount: activeTable,
+            counterCount: activeCounter,
+            palette: p,
+            onTapCounter: activeCounter > 0 ? _showOpenCounterSalesDialog : null,
+          ),
         Text('Ümumi baxış', style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: AppSpacing.md),
         LayoutBuilder(
@@ -432,11 +510,13 @@ class _ActiveSessionsBanner extends StatelessWidget {
     required this.tableCount,
     required this.counterCount,
     required this.palette,
+    this.onTapCounter,
   });
 
   final int tableCount;
   final int counterCount;
   final AppPalette palette;
+  final VoidCallback? onTapCounter;
 
   @override
   Widget build(BuildContext context) {
@@ -450,40 +530,51 @@ class _ActiveSessionsBanner extends StatelessWidget {
 
     final isCounterOnly = tableCount == 0 && counterCount > 0;
     final accent = isCounterOnly ? AdminTheme.warning(context) : AdminTheme.danger(context);
+    final tappable = onTapCounter != null;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: AppSpacing.lg),
-      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.md),
-      decoration: BoxDecoration(
-        color: accent.withValues(alpha: 0.12),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTapCounter,
         borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-        border: Border.all(color: accent.withValues(alpha: 0.35)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(isCounterOnly ? Icons.shopping_bag_outlined : Icons.circle, size: 18, color: accent),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  parts.join(' · '),
-                  style: TextStyle(fontWeight: FontWeight.w600, color: palette.textPrimary),
-                ),
-                if (isCounterOnly) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    'Masalar boş görünür — bunlar stansiya deyil, kassirdə açıq qalan birbaşa satışlardır. '
-                    'Kassir panelində bağlayın və ya ödəniş alın.',
-                    style: TextStyle(fontSize: 12, color: palette.textSecondary, height: 1.35),
-                  ),
-                ],
-              ],
-            ),
+        child: Container(
+          margin: const EdgeInsets.only(bottom: AppSpacing.lg),
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.md),
+          decoration: BoxDecoration(
+            color: accent.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+            border: Border.all(color: accent.withValues(alpha: 0.35)),
           ),
-        ],
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(isCounterOnly ? Icons.shopping_bag_outlined : Icons.circle, size: 18, color: accent),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      parts.join(' · '),
+                      style: TextStyle(fontWeight: FontWeight.w600, color: palette.textPrimary),
+                    ),
+                    if (counterCount > 0) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        tappable
+                            ? 'Toxunaraq açıq birbaşa satışları görün — ödəniş alın və ya ləğv edin.'
+                            : 'Masalar boş görünür — bunlar stansiya deyil, kassirdə açıq qalan birbaşa satışlardır.',
+                        style: TextStyle(fontSize: 12, color: palette.textSecondary, height: 1.35),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              if (tappable)
+                Icon(Icons.chevron_right, color: accent, size: 22),
+            ],
+          ),
+        ),
       ),
     );
   }

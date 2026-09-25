@@ -1171,6 +1171,10 @@ class _OrderDetailDialogState extends ConsumerState<_OrderDetailDialog> {
                           '${o['table_name'] ?? 'Kassa'} • ${o['closed_at']}',
                           style: Theme.of(context).textTheme.bodyMedium,
                         ),
+                        Text(
+                          'Müştəri: ${o['customer_name'] ?? 'Anonim'}',
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
                         if (o['receipt'] != null)
                           Text(
                             'Çek: ${(o['receipt'] as Map)['receipt_number']}',

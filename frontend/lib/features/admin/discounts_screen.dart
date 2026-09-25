@@ -5,6 +5,7 @@ import '../../core/theme/admin_theme.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/theme/cashier_theme.dart';
 import '../../core/utils/json_parse.dart';
+import '../../core/utils/promotion_schedule.dart';
 import '../../core/widgets/app_dialog.dart';
 import '../../core/widgets/app_snackbar.dart';
 import '../../core/widgets/empty_state.dart';
@@ -120,6 +121,9 @@ class _DiscountsScreenState extends ConsumerState<DiscountsScreen> {
         return <String, String>{'from': (m['from'] ?? '').toString(), 'until': (m['until'] ?? '').toString()};
       })),
     ];
+    var validFrom = PromotionSchedule.parseApiDate(promo?['valid_from']);
+    var validUntil = PromotionSchedule.parseApiDate(promo?['valid_until']);
+    var durationMode = PromotionSchedule.modeOf(validFrom, validUntil);
 
     final ok = await showAppDialog<bool>(
       context: context,
@@ -236,7 +240,67 @@ class _DiscountsScreenState extends ConsumerState<DiscountsScreen> {
                   ],
                 ],
                 const SizedBox(height: AppSpacing.lg),
-                Text('Günlər (boş = hər gün)', style: Theme.of(context).textTheme.titleSmall),
+                Text('Müddət', style: Theme.of(context).textTheme.titleSmall),
+                const SizedBox(height: AppSpacing.sm),
+                SegmentedButton<PromotionDurationMode>(
+                  showSelectedIcon: false,
+                  segments: const [
+                    ButtonSegment(value: PromotionDurationMode.unlimited, label: Text('Müddətsiz')),
+                    ButtonSegment(value: PromotionDurationMode.singleDay, label: Text('Konkret gün')),
+                    ButtonSegment(value: PromotionDurationMode.range, label: Text('Aralıq')),
+                  ],
+                  selected: {durationMode},
+                  onSelectionChanged: (s) => setDialogState(() {
+                    durationMode = s.first;
+                    final today = DateTime.now();
+                    if (durationMode == PromotionDurationMode.unlimited) {
+                      validFrom = null;
+                      validUntil = null;
+                    } else if (durationMode == PromotionDurationMode.singleDay) {
+                      final day = validFrom ?? validUntil ?? today;
+                      validFrom = DateTime(day.year, day.month, day.day);
+                      validUntil = validFrom;
+                    } else {
+                      validFrom ??= DateTime(today.year, today.month, today.day);
+                      validUntil ??= validFrom;
+                    }
+                  }),
+                ),
+                if (durationMode == PromotionDurationMode.singleDay) ...[
+                  const SizedBox(height: AppSpacing.md),
+                  _datePickerTile(
+                    context: context,
+                    label: 'Gün',
+                    value: validFrom,
+                    onPicked: (d) => setDialogState(() {
+                      validFrom = d;
+                      validUntil = d;
+                    }),
+                  ),
+                ],
+                if (durationMode == PromotionDurationMode.range) ...[
+                  const SizedBox(height: AppSpacing.md),
+                  _datePickerTile(
+                    context: context,
+                    label: 'Başlanğıc',
+                    value: validFrom,
+                    onPicked: (d) => setDialogState(() => validFrom = d),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  _datePickerTile(
+                    context: context,
+                    label: 'Bitiş',
+                    value: validUntil,
+                    onPicked: (d) => setDialogState(() => validUntil = d),
+                  ),
+                ],
+                const SizedBox(height: AppSpacing.lg),
+                Text(
+                  durationMode == PromotionDurationMode.singleDay
+                      ? 'Günlər (konkret gündə tətbiq olunmur)'
+                      : 'Günlər (boş = hər gün)',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
                 const SizedBox(height: AppSpacing.sm),
                 Wrap(
                   spacing: 8,
@@ -251,16 +315,19 @@ class _DiscountsScreenState extends ConsumerState<DiscountsScreen> {
                     _DayChip(6, 'B.'),
                   ].map((chip) {
                     final selected = selectedDays.contains(chip.value);
+                    final daysLocked = durationMode == PromotionDurationMode.singleDay;
                     return FilterChip(
                       label: Text(chip.label),
-                      selected: selected,
-                      onSelected: (v) => setDialogState(() {
-                        if (v) {
-                          selectedDays.add(chip.value);
-                        } else {
-                          selectedDays.remove(chip.value);
-                        }
-                      }),
+                      selected: selected && !daysLocked,
+                      onSelected: daysLocked
+                          ? null
+                          : (v) => setDialogState(() {
+                                if (v) {
+                                  selectedDays.add(chip.value);
+                                } else {
+                                  selectedDays.remove(chip.value);
+                                }
+                              }),
                     );
                   }).toList(),
                 ),
@@ -270,36 +337,37 @@ class _DiscountsScreenState extends ConsumerState<DiscountsScreen> {
                 ...hourRanges.asMap().entries.map((entry) {
                   final i = entry.key;
                   final range = entry.value;
-                  final fromCtrl = TextEditingController(text: range['from']);
-                  final untilCtrl = TextEditingController(text: range['until']);
-                  return Row(
-                    children: [
-                      Expanded(
-                        child: AppTextField(
-                          controller: fromCtrl,
-                          label: 'Başlanğıc',
-                          hint: '09:00',
-                          onChanged: (v) => range['from'] = v,
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: _timePickerTile(
+                            context: context,
+                            label: 'Başlanğıc',
+                            value: range['from'] ?? '',
+                            onPicked: (v) => setDialogState(() => range['from'] = v),
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: AppSpacing.md),
-                      Expanded(
-                        child: AppTextField(
-                          controller: untilCtrl,
-                          label: 'Bitiş',
-                          hint: '18:00',
-                          onChanged: (v) => range['until'] = v,
+                        const SizedBox(width: AppSpacing.md),
+                        Expanded(
+                          child: _timePickerTile(
+                            context: context,
+                            label: 'Bitiş',
+                            value: range['until'] ?? '',
+                            onPicked: (v) => setDialogState(() => range['until'] = v),
+                          ),
                         ),
-                      ),
-                      IconButton(
-                        onPressed: () => setDialogState(() => hourRanges.removeAt(i)),
-                        icon: const Icon(Icons.delete_outline),
-                      ),
-                    ],
+                        IconButton(
+                          onPressed: () => setDialogState(() => hourRanges.removeAt(i)),
+                          icon: const Icon(Icons.delete_outline),
+                        ),
+                      ],
+                    ),
                   );
                 }),
                 TextButton.icon(
-                  onPressed: () => setDialogState(() => hourRanges.add({'from': '', 'until': ''})),
+                  onPressed: () => setDialogState(() => hourRanges.add({'from': '09:00', 'until': '18:00'})),
                   icon: const Icon(Icons.add),
                   label: const Text('Aralıq əlavə et'),
                 ),
@@ -341,6 +409,43 @@ class _DiscountsScreenState extends ConsumerState<DiscountsScreen> {
       showAppSnackBar(context, 'Ən azı bir məhsul seçin', isError: true);
       return;
     }
+    if (durationMode == PromotionDurationMode.singleDay && validFrom == null) {
+      showAppSnackBar(context, 'Kampaniya gününü seçin', isError: true);
+      return;
+    }
+    if (durationMode == PromotionDurationMode.range) {
+      final from = validFrom;
+      final until = validUntil;
+      if (from == null || until == null) {
+        showAppSnackBar(context, 'Başlanğıc və bitiş tarixini seçin', isError: true);
+        return;
+      }
+      final fromDay = DateTime(from.year, from.month, from.day);
+      final untilDay = DateTime(until.year, until.month, until.day);
+      if (fromDay.isAfter(untilDay)) {
+        showAppSnackBar(context, 'Bitiş tarixi başlanğıcdan əvvəl ola bilməz', isError: true);
+        return;
+      }
+    }
+
+    final cleanedHours = <Map<String, String>>[];
+    for (final r in hourRanges) {
+      final from = (r['from'] ?? '').trim();
+      final until = (r['until'] ?? '').trim();
+      if (from.isEmpty && until.isEmpty) continue;
+      final fromHm = PromotionSchedule.normalizeHm(from);
+      final untilHm = PromotionSchedule.normalizeHm(until);
+      if (fromHm == null || untilHm == null) {
+        showAppSnackBar(context, 'Saat HH:MM formatında olmalıdır', isError: true);
+        return;
+      }
+      cleanedHours.add({'from': fromHm, 'until': untilHm});
+    }
+
+    final payloadFrom = durationMode == PromotionDurationMode.unlimited ? null : PromotionSchedule.toApiDate(validFrom);
+    final payloadUntil = durationMode == PromotionDurationMode.unlimited
+        ? null
+        : PromotionSchedule.toApiDate(durationMode == PromotionDurationMode.singleDay ? validFrom : validUntil);
 
     final payload = {
       'name': nameCtrl.text.trim(),
@@ -350,11 +455,10 @@ class _DiscountsScreenState extends ConsumerState<DiscountsScreen> {
       'tariff_names': scope == 'tariffs' ? selectedTariffs.toList() : <String>[],
       'product_ids': scope == 'products' ? productIds : <int>[],
       'is_active': isActive,
-      'valid_days': selectedDays.toList(),
-      'valid_hours': hourRanges
-          .where((r) => (r['from'] ?? '').isNotEmpty && (r['until'] ?? '').isNotEmpty)
-          .map((r) => {'from': r['from']!, 'until': r['until']!})
-          .toList(),
+      'valid_from': payloadFrom,
+      'valid_until': payloadUntil,
+      'valid_days': durationMode == PromotionDurationMode.singleDay ? <int>[] : selectedDays.toList(),
+      'valid_hours': cleanedHours,
     };
 
     try {
@@ -407,6 +511,70 @@ class _DiscountsScreenState extends ConsumerState<DiscountsScreen> {
     } catch (e) {
       if (mounted) showAppSnackBar(context, e.toString(), isError: true);
     }
+  }
+
+  Widget _datePickerTile({
+    required BuildContext context,
+    required String label,
+    required DateTime? value,
+    required ValueChanged<DateTime> onPicked,
+  }) {
+    return InkWell(
+      onTap: () async {
+        final picked = await showDatePicker(
+          context: context,
+          initialDate: value ?? DateTime.now(),
+          firstDate: DateTime(2020),
+          lastDate: DateTime(2100),
+        );
+        if (picked != null) onPicked(picked);
+      },
+      child: InputDecorator(
+        decoration: InputDecoration(
+          labelText: label,
+          prefixIcon: const Icon(Icons.calendar_today_outlined, size: 20),
+        ),
+        child: Text(
+          value == null ? 'Tarix seçin' : PromotionSchedule.formatDay(value),
+          style: Theme.of(context).textTheme.bodyLarge,
+        ),
+      ),
+    );
+  }
+
+  Widget _timePickerTile({
+    required BuildContext context,
+    required String label,
+    required String value,
+    required ValueChanged<String> onPicked,
+  }) {
+    return InkWell(
+      onTap: () async {
+        final minutes = PromotionSchedule.parseMinutes(value);
+        final picked = await showTimePicker(
+          context: context,
+          initialTime: minutes != null
+              ? TimeOfDay(hour: minutes ~/ 60, minute: minutes % 60)
+              : const TimeOfDay(hour: 9, minute: 0),
+          builder: (context, child) {
+            return MediaQuery(
+              data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
+              child: child!,
+            );
+          },
+        );
+        if (picked != null) {
+          onPicked(PromotionSchedule.formatHm(picked.hour, picked.minute));
+        }
+      },
+      child: InputDecorator(
+        decoration: InputDecoration(labelText: label),
+        child: Text(
+          value.isEmpty ? 'Seçin' : value,
+          style: Theme.of(context).textTheme.bodyLarge,
+        ),
+      ),
+    );
   }
 
   Widget _closeButton({required VoidCallback onPressed, String tooltip = 'Bağla'}) {
@@ -499,10 +667,21 @@ class _DiscountsScreenState extends ConsumerState<DiscountsScreen> {
         }
         final days = p['valid_days'] as List<dynamic>? ?? [];
         final hours = p['valid_hours'] as List<dynamic>? ?? [];
+        final dateLabel = PromotionSchedule.rangeLabel(
+          PromotionSchedule.parseApiDate(p['valid_from']),
+          PromotionSchedule.parseApiDate(p['valid_until']),
+        );
         final daysLabel = days.isEmpty
-            ? 'hər gün'
+            ? null
             : days.map((d) => const ['B.E.', 'Ç.A.', 'Ç.', 'C.A.', 'C.', 'Ş.', 'B.'][jsonToInt(d)]).join(', ');
         final hoursLabel = hours.isEmpty ? 'bütün gün' : hours.map((h) => '${h['from']}-${h['until']}').join(', ');
+        final parts = <String>[
+          type == 'percent' ? '${value.toStringAsFixed(0)}%' : '${value.toStringAsFixed(2)} ₼',
+          scopeLabel,
+          if (dateLabel != null) dateLabel,
+          if (daysLabel != null) daysLabel else if (dateLabel == null) 'hər gün',
+          hoursLabel,
+        ];
 
         return AdminListTile(
           leading: CircleAvatar(
@@ -516,8 +695,7 @@ class _DiscountsScreenState extends ConsumerState<DiscountsScreen> {
             ),
           ),
           title: p['name'] as String? ?? '',
-          subtitle:
-              '${type == 'percent' ? '${value.toStringAsFixed(0)}%' : '${value.toStringAsFixed(2)} ₼'} · $scopeLabel · $daysLabel · $hoursLabel',
+          subtitle: parts.join(' · '),
           trailing: Switch(
             value: active,
             onChanged: (_) => _toggleActive(p),

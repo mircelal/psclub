@@ -34,7 +34,29 @@ final class PromotionService
         );
         $stmt->execute([$businessId]);
 
-        return $stmt->fetchAll() ?: [];
+        return self::filterCurrentlyActive($stmt->fetchAll() ?: [], $this->serverNow());
+    }
+
+    /**
+     * @param list<array<string, mixed>> $rows
+     * @return list<array<string, mixed>>
+     */
+    public static function filterCurrentlyActive(array $rows, \DateTimeInterface $now): array
+    {
+        $out = [];
+        foreach ($rows as $promo) {
+            $from = isset($promo['valid_from']) && $promo['valid_from'] !== '' ? (string) $promo['valid_from'] : null;
+            $until = isset($promo['valid_until']) && $promo['valid_until'] !== '' ? (string) $promo['valid_until'] : null;
+            if (!self::isWithinDateRange($from, $until, $now)) {
+                continue;
+            }
+            if (!self::isWithinTimeWindow($promo, $now)) {
+                continue;
+            }
+            $out[] = $promo;
+        }
+
+        return $out;
     }
 
     /**
@@ -54,7 +76,7 @@ final class PromotionService
             if (($promo['scope'] ?? '') === 'products') {
                 continue;
             }
-            if (!$this->matchesScope($promo, $tariffName) || !$this->matchesTimeWindow($promo)) {
+            if (!$this->matchesScope($promo, $tariffName) || !self::isWithinTimeWindow($promo, $this->serverNow())) {
                 continue;
             }
             $amount = DiscountCalculator::amount($timeCharge, (string) $promo['discount_type'], (float) $promo['discount_value']);
@@ -89,7 +111,7 @@ final class PromotionService
             if (($promo['scope'] ?? '') !== 'products') {
                 continue;
             }
-            if (!$this->matchesTimeWindow($promo)) {
+            if (!self::isWithinTimeWindow($promo, $this->serverNow())) {
                 continue;
             }
             $ids = $this->decodeProductIds($promo['product_ids'] ?? null);
@@ -332,63 +354,136 @@ final class PromotionService
         return false;
     }
 
-    private function matchesTimeWindow(array $promo): bool
+    public static function normalizeValidFrom(mixed $value): ?string
     {
-        $now = $this->pdo->query('SELECT NOW()')->fetchColumn();
-        $dt = $now instanceof \DateTimeInterface ? $now : new \DateTimeImmutable((string) $now);
-        $now = $dt instanceof \DateTimeInterface ? $dt : new \DateTimeImmutable();
+        $day = self::parseDateOnly($value);
+        return $day === null ? null : $day . ' 00:00:00';
+    }
 
-        $days = json_decode((string) ($promo['valid_days'] ?? '[]'), true);
-        if (is_array($days) && $days !== []) {
-            $weekday = (int) $now->format('N') - 1;
-            // Loose compare: JSON may decode ints as strings depending on driver.
-            $normalized = array_map(static fn ($d) => (int) $d, $days);
-            if (!in_array($weekday, $normalized, true)) {
-                return false;
-            }
+    public static function normalizeValidUntil(mixed $value): ?string
+    {
+        $day = self::parseDateOnly($value);
+        return $day === null ? null : $day . ' 23:59:59';
+    }
+
+    public static function parseDateOnly(mixed $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        $s = trim((string) $value);
+        if (!preg_match('/^(\d{4}-\d{2}-\d{2})/', $s, $m)) {
+            return null;
+        }
+        $parsed = \DateTimeImmutable::createFromFormat('Y-m-d', $m[1]);
+        if ($parsed === false || $parsed->format('Y-m-d') !== $m[1]) {
+            return null;
         }
 
-        $hours = json_decode((string) ($promo['valid_hours'] ?? '[]'), true);
-        if (is_array($hours) && $hours !== []) {
-            $current = (int) $now->format('H') * 60 + (int) $now->format('i');
-            foreach ($hours as $range) {
-                if (!is_array($range)) {
-                    continue;
-                }
-                $from = $this->parseMinutes($range['from'] ?? null);
-                $until = $this->parseMinutes($range['until'] ?? null);
-                if ($from === null || $until === null) {
-                    continue;
-                }
-                if ($from <= $until) {
-                    if ($current >= $from && $current < $until) {
-                        return true;
-                    }
-                } else {
-                    if ($current >= $from || $current < $until) {
-                        return true;
-                    }
-                }
-            }
+        return $m[1];
+    }
+
+    public static function isWithinDateRange(?string $from, ?string $until, \DateTimeInterface $now): bool
+    {
+        $ts = $now->format('Y-m-d H:i:s');
+        if ($from !== null && $from !== '' && $ts < $from) {
+            return false;
+        }
+        if ($until !== null && $until !== '' && $ts > $until) {
             return false;
         }
 
         return true;
     }
 
-    private function parseMinutes(mixed $time): ?int
+    /**
+     * @param array<string, mixed> $promo
+     */
+    public static function isWithinTimeWindow(array $promo, \DateTimeInterface $now): bool
+    {
+        $days = self::decodeJsonList($promo['valid_days'] ?? null);
+        if ($days !== []) {
+            $weekday = (int) $now->format('N') - 1;
+            $normalized = array_map(static fn ($d) => (int) $d, $days);
+            if (!in_array($weekday, $normalized, true)) {
+                return false;
+            }
+        }
+
+        $hours = self::decodeJsonList($promo['valid_hours'] ?? null);
+        if ($hours === []) {
+            return true;
+        }
+
+        $current = (int) $now->format('H') * 60 + (int) $now->format('i');
+        foreach ($hours as $range) {
+            if (!is_array($range)) {
+                continue;
+            }
+            $from = self::parseClockMinutes($range['from'] ?? null);
+            $until = self::parseClockMinutes($range['until'] ?? null);
+            if ($from === null || $until === null) {
+                continue;
+            }
+            if ($from <= $until) {
+                if ($current >= $from && $current <= $until) {
+                    return true;
+                }
+            } elseif ($current >= $from || $current <= $until) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static function parseClockMinutes(mixed $time): ?int
     {
         if ($time === null || $time === '') {
             return null;
         }
-        $parts = explode(':', (string) $time);
-        $h = (int) ($parts[0] ?? 0);
-        $m = (int) ($parts[1] ?? 0);
-        if ($h < 0 || $h > 23 || $m < 0 || $m > 59) {
+        if (!preg_match('/^(\d{1,2}):(\d{2})$/', trim((string) $time), $m)) {
+            return null;
+        }
+        $h = (int) $m[1];
+        $min = (int) $m[2];
+        if ($h > 23 || $min > 59) {
             return null;
         }
 
-        return $h * 60 + $m;
+        return $h * 60 + $min;
+    }
+
+    /**
+     * @return list<mixed>
+     */
+    private static function decodeJsonList(mixed $raw): array
+    {
+        if (is_array($raw)) {
+            return $raw;
+        }
+        if ($raw === null || $raw === '') {
+            return [];
+        }
+        $decoded = json_decode((string) $raw, true);
+
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    private function serverNow(): \DateTimeImmutable
+    {
+        try {
+            $now = $this->pdo->query('SELECT NOW()')->fetchColumn();
+            if ($now instanceof \DateTimeInterface) {
+                return \DateTimeImmutable::createFromInterface($now);
+            }
+            if (is_string($now) && $now !== '') {
+                return new \DateTimeImmutable($now);
+            }
+        } catch (\Throwable) {
+        }
+
+        return new \DateTimeImmutable();
     }
 
     /**
@@ -420,11 +515,23 @@ final class PromotionService
 
     private function hasPromotionsTable(): bool
     {
-        $stmt = $this->pdo->query(
-            "SELECT 1 FROM information_schema.TABLES
-             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'promotions' LIMIT 1"
-        );
+        try {
+            $stmt = $this->pdo->query(
+                "SELECT 1 FROM information_schema.TABLES
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'promotions' LIMIT 1"
+            );
+            if ($stmt !== false && $stmt->fetchColumn()) {
+                return true;
+            }
+        } catch (\Throwable) {
+        }
 
-        return (bool) $stmt->fetchColumn();
+        try {
+            $this->pdo->query('SELECT 1 FROM promotions LIMIT 1');
+
+            return true;
+        } catch (\Throwable) {
+            return false;
+        }
     }
 }

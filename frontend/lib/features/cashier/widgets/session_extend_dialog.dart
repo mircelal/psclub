@@ -8,16 +8,12 @@ import '../../../core/utils/package_session.dart';
 import '../../../services/pos_service.dart';
 
 /// Sessiya və ya masa sətirindən uzatma mümkündürmü (paket/kassa istisna).
+/// Planlaşdırılmış müddət (3 saat və s.) düyməni gizlətmir.
 bool sessionCanExtendTime(Map<String, dynamic> data, BusinessConfig config) {
   final sessionType = data['session_type'] as String? ?? 'table';
   if (sessionType == 'counter') return false;
   if (sessionPackagePrice(data) > 0 || tablePackagePrice(data) > 0) return false;
   if (!config.timeBillingEnabled) return false;
-
-  final planned = jsonToIntOrNull(data['planned_minutes']) ?? 0;
-  if (planned > 0) {
-    return config.extendOptionsForPlanned(planned).isNotEmpty;
-  }
   return config.extendTimeOptions.isNotEmpty;
 }
 
@@ -42,9 +38,7 @@ Future<bool> showSessionExtendTimeDialog({
   final config = ref.read(businessConfigProvider).valueOrNull ?? BusinessConfig.fallback;
   final planned = jsonToIntOrNull(session['planned_minutes']) ?? 0;
   final isOpenSession = planned <= 0;
-  final options = isOpenSession
-      ? config.extendTimeOptions
-      : config.extendOptionsForPlanned(planned);
+  final options = config.extendTimeOptions;
 
   if (options.isEmpty) return false;
 

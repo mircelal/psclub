@@ -14,6 +14,7 @@ class ShiftRailCard extends StatelessWidget {
     this.onCashIn,
     this.onCashOut,
     required this.onCloseShift,
+    this.onTodaySales,
   });
 
   final BusinessConfig biz;
@@ -22,6 +23,7 @@ class ShiftRailCard extends StatelessWidget {
   final VoidCallback? onCashIn;
   final VoidCallback? onCashOut;
   final VoidCallback onCloseShift;
+  final VoidCallback? onTodaySales;
 
   @override
   Widget build(BuildContext context) {
@@ -102,6 +104,21 @@ class ShiftRailCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 6),
+            if (onTodaySales != null) ...[
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.tonalIcon(
+                  onPressed: onTodaySales,
+                  icon: const Icon(Icons.receipt_long_outlined, size: 18),
+                  label: const Text('Bugünkü satışlar', style: TextStyle(fontSize: 12)),
+                  style: FilledButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 6),
+            ],
             SizedBox(
               width: double.infinity,
               child: OutlinedButton(

@@ -32,6 +32,8 @@ import 'tables_provider.dart';
 import 'shift_provider.dart';
 import 'shift_dialogs.dart';
 import 'shift_guard.dart';
+import 'open_counter_sessions_provider.dart';
+import 'widgets/shift_sales_dialog.dart';
 
 class CashierHome extends ConsumerStatefulWidget {
   const CashierHome({super.key});
@@ -58,6 +60,7 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
     });
     _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) {
       ref.read(tablesProvider.notifier).refresh();
+      ref.read(openCounterSessionsProvider.notifier).refresh();
       refreshCurrentShift(ref);
     });
     _tickTimer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -100,6 +103,7 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
 
   void _onSessionChanged() {
     ref.read(tablesProvider.notifier).refresh();
+    ref.read(openCounterSessionsProvider.notifier).refresh();
     refreshCurrentShift(ref);
   }
 
@@ -107,6 +111,18 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
     if (!await ensureOpenShiftForCashier(context, ref)) return;
     if (!mounted) return;
     showSessionPanel(context, ref, sessionId, _onSessionChanged);
+  }
+
+  Future<void> _showOpenCounterSale(int sessionId) async {
+    if (!await ensureOpenShiftForCashier(context, ref)) return;
+    if (!mounted) return;
+    showSessionPanel(
+      context,
+      ref,
+      sessionId,
+      _onSessionChanged,
+      lockUntilSettled: true,
+    );
   }
 
   Future<void> _startCounterSale() async {
@@ -120,7 +136,7 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
       showSessionPanel(
         context,
         ref,
-        session['id'] as int,
+        jsonToInt(session['id']),
         _onSessionChanged,
         lockUntilSettled: true,
       );
@@ -128,6 +144,10 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
     } catch (e) {
       if (mounted) showAppSnackBar(context, e.toString(), isError: true);
     }
+  }
+
+  Future<void> _showTodaySales(Map<String, dynamic> shift) async {
+    await showShiftSalesDialog(context, ref, shift);
   }
 
   List<Map<String, dynamic>> _applyFilter(List<Map<String, dynamic>> list) {
@@ -162,6 +182,7 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
 
   void _refresh() {
     ref.read(tablesProvider.notifier).refresh();
+    ref.read(openCounterSessionsProvider.notifier).refresh();
     refreshCurrentShift(ref);
   }
 
@@ -279,6 +300,7 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
     final currentShift = shiftAsync.valueOrNull;
     final tablesAsync = ref.watch(tablesProvider);
     final tablesList = tablesAsync.valueOrNull;
+    final openCounterSales = ref.watch(openCounterSessionsProvider).valueOrNull ?? const [];
     final uiSettings = ref.watch(appSettingsProvider).valueOrNull;
     final width = MediaQuery.sizeOf(context).width;
     final bp = CashierBreakpoints.fromWidth(width);
@@ -317,6 +339,9 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
         onCashIn: currentShift != null ? () => _handleCashIn(currentShift) : null,
         onCashOut: currentShift != null ? () => _handleCashOut(currentShift) : null,
         onCloseShift: currentShift != null ? () => _handleCloseShift(currentShift) : null,
+        onTodaySales: currentShift != null ? () => _showTodaySales(currentShift) : null,
+        openCounterSales: openCounterSales,
+        onOpenCounterSale: blockSales ? null : _showOpenCounterSale,
         onFilterChanged: (f) {
           setState(() => _filter = f);
           if (inDrawer) _scaffoldKey.currentState?.closeDrawer();
@@ -397,7 +422,12 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
                 horizontalScroll: bp.isTablet,
               ),
             ],
-            if (bp.isDesktop && !blockSales) CounterSaleToolbar(onNewSale: _startCounterSale),
+            if (bp.isDesktop && !blockSales)
+              CounterSaleToolbar(
+                onNewSale: _startCounterSale,
+                openSales: openCounterSales,
+                onOpenSale: _showOpenCounterSale,
+              ),
             Expanded(
               child: blockSales
                   ? _ShiftBlockedWorkspace(onOpenShift: _handleOpenShift)

@@ -60,6 +60,18 @@ final class PromotionsController
         $tariffJson = $scope === 'products' ? null : $this->encodeTariffNames($body);
         $productJson = $scope === 'products' ? $this->encodeProductIds($body) : null;
 
+        $from = $this->normalizedDate($body['valid_from'] ?? null, false);
+        if ($from === false) {
+            return ApiResponse::error('Başlanğıc tarixi yanlışdır', 422);
+        }
+        $until = $this->normalizedDate($body['valid_until'] ?? null, true);
+        if ($until === false) {
+            return ApiResponse::error('Bitiş tarixi yanlışdır', 422);
+        }
+        if ($from !== null && $until !== null && $from > $until) {
+            return ApiResponse::error('Bitiş tarixi başlanğıcdan əvvəl ola bilməz', 422);
+        }
+
         $this->pdo->prepare(
             'INSERT INTO promotions (business_id, name, discount_type, discount_value, applies_to, scope, tariff_names, product_ids, is_active, valid_from, valid_until, valid_days, valid_hours, sort_order, created_at, updated_at)
              VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())'
@@ -72,8 +84,8 @@ final class PromotionsController
             $tariffJson,
             $productJson,
             !empty($body['is_active']) ? 1 : 0,
-            $this->nullableDate($body['valid_from'] ?? null),
-            $this->nullableDate($body['valid_until'] ?? null),
+            $from,
+            $until,
             $this->encodeJsonList($body['valid_days'] ?? null),
             $this->encodeJsonHours($body['valid_hours'] ?? null),
             (int) ($body['sort_order'] ?? 0),
@@ -99,8 +111,15 @@ final class PromotionsController
                 continue;
             }
             if (in_array($key, ['valid_from', 'valid_until'], true)) {
+                $normalized = $this->normalizedDate($body[$key], $key === 'valid_until');
+                if ($normalized === false) {
+                    return ApiResponse::error(
+                        $key === 'valid_until' ? 'Bitiş tarixi yanlışdır' : 'Başlanğıc tarixi yanlışdır',
+                        422
+                    );
+                }
                 $fields[] = "{$key} = ?";
-                $params[] = $this->nullableDate($body[$key]);
+                $params[] = $normalized;
                 continue;
             }
             if ($key === 'valid_days') {
@@ -157,6 +176,26 @@ final class PromotionsController
 
         if ($fields === []) {
             return ApiResponse::error('No fields', 422);
+        }
+
+        if (array_key_exists('valid_from', $body) || array_key_exists('valid_until', $body)) {
+            $existingStmt = $this->pdo->prepare('SELECT valid_from, valid_until FROM promotions WHERE id = ? LIMIT 1');
+            $existingStmt->execute([$id]);
+            $existing = $existingStmt->fetch() ?: [];
+            $from = array_key_exists('valid_from', $body)
+                ? $this->normalizedDate($body['valid_from'], false)
+                : ($existing['valid_from'] ?? null);
+            $until = array_key_exists('valid_until', $body)
+                ? $this->normalizedDate($body['valid_until'], true)
+                : ($existing['valid_until'] ?? null);
+            if ($from === false || $until === false) {
+                return ApiResponse::error('Tarix yanlışdır', 422);
+            }
+            $fromStr = $from !== null && $from !== '' ? (string) $from : null;
+            $untilStr = $until !== null && $until !== '' ? (string) $until : null;
+            if ($fromStr !== null && $untilStr !== null && $fromStr > $untilStr) {
+                return ApiResponse::error('Bitiş tarixi başlanğıcdan əvvəl ola bilməz', 422);
+            }
         }
 
         $fields[] = 'updated_at = NOW()';
@@ -244,13 +283,19 @@ final class PromotionsController
         return json_encode($clean, JSON_UNESCAPED_UNICODE);
     }
 
-    private function nullableDate(mixed $value): ?string
+    /**
+     * @return string|null|false false = invalid non-empty value
+     */
+    private function normalizedDate(mixed $value, bool $endOfDay): string|null|false
     {
         if ($value === null || $value === '') {
             return null;
         }
+        $normalized = $endOfDay
+            ? PromotionService::normalizeValidUntil($value)
+            : PromotionService::normalizeValidFrom($value);
 
-        return (string) $value;
+        return $normalized ?? false;
     }
 
     /**
@@ -322,6 +367,9 @@ final class PromotionsController
             $from = isset($range['from']) ? trim((string) $range['from']) : null;
             $until = isset($range['until']) ? trim((string) $range['until']) : null;
             if ($from === null || $until === null || $from === '' || $until === '') {
+                continue;
+            }
+            if (PromotionService::parseClockMinutes($from) === null || PromotionService::parseClockMinutes($until) === null) {
                 continue;
             }
             $clean[] = ['from' => $from, 'until' => $until];

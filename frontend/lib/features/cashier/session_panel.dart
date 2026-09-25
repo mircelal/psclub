@@ -753,8 +753,9 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
     );
   }
 
-  Future<void> _voidEmptyCounterIfNeeded() async {
-    if (!_isCounter || _items.isNotEmpty) return;
+  /// Boş birbaşa satışı ləğv edir. Uğursuz olduqda `false` qaytarır (panel bağlanmamalıdır).
+  Future<bool> _voidEmptyCounterIfNeeded() async {
+    if (!_isCounter || _items.isNotEmpty) return true;
     try {
       await ref.read(posServiceProvider).closeSession(
             widget.sessionId,
@@ -763,7 +764,17 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
             cardAmount: 0,
           );
       widget.onChanged();
-    } catch (_) {}
+      return true;
+    } catch (e) {
+      if (mounted) {
+        showAppSnackBar(
+          context,
+          'Boş satış ləğv olunmadı: $e. Yenidən cəhd edin və ya satışlar siyahısından açın.',
+          isError: true,
+        );
+      }
+      return false;
+    }
   }
 
   Future<void> _clearAllItems() async {
@@ -813,13 +824,14 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
           );
           if (confirm != true || !mounted) return;
           setState(() => _itemBusy = true);
+          var voided = false;
           try {
             await _clearAllItems();
-            await _voidEmptyCounterIfNeeded();
+            voided = await _voidEmptyCounterIfNeeded();
           } finally {
             if (mounted) setState(() => _itemBusy = false);
           }
-          if (mounted) Navigator.pop(context);
+          if (voided && mounted) Navigator.pop(context);
           return;
         case CounterUnpaidChoice.cancel:
         case null:
@@ -828,7 +840,8 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
     }
 
     if (_isCounter && _items.isEmpty) {
-      await _voidEmptyCounterIfNeeded();
+      final voided = await _voidEmptyCounterIfNeeded();
+      if (!voided) return;
     }
     if (mounted) Navigator.pop(context);
   }

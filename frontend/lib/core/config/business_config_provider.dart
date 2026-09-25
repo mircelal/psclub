@@ -122,15 +122,15 @@ class BusinessConfig {
 
 
 
-  List<int> extendOptionsForPlanned(int currentPlanned) {
-
-    return extendTimeOptions.where((m) => currentPlanned + m <= maxTimedOpenMinutes).toList();
-
-  }
-
-
+  /// Açılış presetləri üçün maksimum (3 saat).
 
   static const maxTimedOpenMinutes = 180;
+
+
+
+  /// Uzatma ilə toplanmış planlaşdırılmış müddət üçün backend tavanı (24 saat).
+
+  static const maxExtendPlannedMinutes = 1440;
 
 
 

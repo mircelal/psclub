@@ -409,6 +409,9 @@ final class TablesController
                AND opened_at < DATE_SUB(NOW(), INTERVAL 30 MINUTE)
                AND NOT EXISTS (SELECT 1 FROM session_items si WHERE si.session_id = sessions.id)"
         );
+
+        // Məhsullu tərk edilmiş birbaşa satışlar silinmir — yalnız is_stale_counter (enrichSession) ilə işarələnir.
+        // Kassir / admin UI açıq satışlar siyahısından bərpa və ya bağlaya bilər.
     }
 
     private function hasTableTariffs(): bool
