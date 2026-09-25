@@ -6,7 +6,14 @@ Bu təlimat **DirectAdmin / FTP** ilə `psapi.sayt.cam` API serverinə yeniləm�
 
 ## 1. Zip-ləri hazırlamaq (lokal PC)
 
-### Konfiqurasiya (bir dəfə)
+Layihə kökündə `build-deploy.bat` işlədin. Fayl yoxdursa konfiqurasiyanı özü yaradır; `ServerDbPassword` doldurulmalıdır. Lokal MySQL və Flutter işləməlidir: skript müvəqqəti baza, `install.sql` və production `.env` yaradıb zip-ə qoyur.
+
+```bat
+build-deploy.bat
+build-deploy.bat backend
+```
+
+### Konfiqurasiya (bir dəfə, bat özü də köçürür)
 
 ```powershell
 copy scripts\deploy-config.example.ps1 scripts\deploy-config.local.ps1
@@ -66,7 +73,8 @@ Zip içində `OXU-BUNU.txt` oxuyun. Qısa:
 > ⚠️ Köhnə DirectAdmin `index.html` ("Something amazing") **silin**.
 
 **Vacib:**
-- `.env` zip-də **yeni JWT** ilə gəlir — köhnə `.env`-i **tam əvəz etməyin**; yalnız yeni sətirləri köhnəyə **əlavə** edin (aşağıya baxın).
+- Yeni server: zip-dəki `site-root/.env` və `database/install.sql` boş bazaya import üçündür.
+- Mövcud server: `.env`-i əvəz etməyin və `install.sql` import etməyin (cədvəlləri silir). Yalnız kodu və `database/patches` yeniləyin.
 - `storage/` yazıla bilən olmalıdır (chmod 775).
 - PHP **8.2+** seçin.
 
@@ -198,7 +206,7 @@ Artıq tətbiq olunmuş patch-lər **təkrar işlədilmir** (skipped).
 ## 7. Tez-tez soruşulanlar
 
 **S: Köhnə `.env` silinirmi?**  
-C: Xeyr. Yalnız `MIGRATE_KEY` və yeni parametrləri əlavə edin. DB şifrəsi və JWT köhnə qalmalıdır (tam zip `.env`-i köhnənin üstünə yazmayın).
+C: Zip-də yeni server üçün `.env` var. Mövcud serverdə köhnə `.env`-in üstünə yazmayın. DB şifrəsi və JWT köhnə qalmalıdır.
 
 **S: phpMyAdmin ilə import?**  
 C: Olar, amma `database/patches/` sırası ilə və yalnız **tətbiq olunmamış** faylları. `server-setup.php` avtomatik edir.
@@ -215,6 +223,8 @@ C: `customer_groups` migrasiyası işləməyib — 3.3 addımını edin.
 
 | Skript | Çıxış |
 |--------|-------|
+| `build-deploy.bat` | `dist/psapi-backend.zip` + `dist/ps-frontend.zip` |
+| `build-deploy.bat backend` | yalnız `dist/psapi-backend.zip` |
 | `scripts/build-backend-deploy.ps1` | `dist/psapi-backend.zip` |
 | `scripts/build-deploy.ps1` | backend + `dist/ps-frontend.zip` |
 | `scripts/pack-server-hotfix.ps1` | `dist/server-hotfix.zip` |

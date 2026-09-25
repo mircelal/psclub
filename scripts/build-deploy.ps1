@@ -4,9 +4,10 @@
   PS Club — DirectAdmin üçün backend + frontend zip hazırlayır.
 
 .USAGE
+  build-deploy.bat
   powershell -ExecutionPolicy Bypass -File .\scripts\build-deploy.ps1
 
-  Parametrləri skriptin başında dəyişə bilərsiniz.
+  Domain və DB: scripts\deploy-config.local.ps1
 #>
 
 $ErrorActionPreference = 'Stop'
@@ -27,8 +28,8 @@ if (Test-Path $LocalConfig) { . $LocalConfig }
 elseif (Test-Path (Join-Path $PSScriptRoot 'deploy-config.example.ps1')) {
     Write-Warning 'deploy-config.local.ps1 yoxdur — nümunə: deploy-config.example.ps1 kopyalayın.'
 }
-if (-not $ServerDbPassword) {
-    throw 'ServerDbPassword boşdur. scripts/deploy-config.local.ps1 yaradın.'
+if (-not $ServerDbPassword -or $ServerDbPassword -eq 'BURAYA_SIFRE') {
+    throw 'scripts\deploy-config.local.ps1 içində ServerDbPassword doldurun, sonra build-deploy.bat-ı yenidən işlədin.'
 }
 
 # Lokal build üçün (Laragon) — müvəqqəti DB + install.sql yaradılır
@@ -126,13 +127,35 @@ function Copy-BackendTree {
     }
 }
 
-# Zip-ə daxil edilmir: .env, install.sql, server setup skriptləri
+function Write-ProductionEnv([string]$Path, [string]$JwtSecret, [string]$MigrateKey) {
+    @"
+APP_ENV=production
+APP_DEBUG=false
+APP_URL=https://$ApiDomain
+APP_TIMEZONE=Asia/Baku
+
+DB_HOST=$ServerDbHost
+DB_PORT=3306
+DB_NAME=$ServerDbName
+DB_USER=$ServerDbUser
+DB_PASS=$ServerDbPassword
+
+JWT_SECRET=$JwtSecret
+JWT_TTL=86400
+
+CORS_ORIGIN=https://$WebDomain
+MIGRATE_KEY=$MigrateKey
+"@ | Set-Content -Path $Path -Encoding UTF8 -NoNewline
+    Add-Content -Path $Path -Value "" -Encoding UTF8
+}
+
+# Vebdə qalmamalıdır. .env və install.sql zip-ə daxildir (yeni server üçün).
 $Script:BackendPublicSetupExclude = @(
     'server-setup.php',
     'run-migrate.php',
-    'reset-sales-data.php'
+    'reset-sales-data.php',
+    'setup.php'
 )
-$Script:BackendDatabaseExclude = @('install.sql', 'setup.php')
 
 function Remove-BackendSetupFiles {
     param([string[]]$Roots)
@@ -143,12 +166,6 @@ function Remove-BackendSetupFiles {
             Get-ChildItem -Path $root -Filter $name -Recurse -File -ErrorAction SilentlyContinue |
                 Remove-Item -Force -ErrorAction SilentlyContinue
         }
-        Get-ChildItem -Path $root -Filter '.env' -Recurse -File -ErrorAction SilentlyContinue |
-            Remove-Item -Force -ErrorAction SilentlyContinue
-        Get-ChildItem -Path $root -Filter 'install.sql' -Recurse -File -ErrorAction SilentlyContinue |
-            Remove-Item -Force -ErrorAction SilentlyContinue
-        Get-ChildItem -Path $root -Filter 'setup.php' -Recurse -File -ErrorAction SilentlyContinue |
-            Remove-Item -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -171,17 +188,22 @@ PS Club API — DirectAdmin quraşdırma
 
 3) Köhnə DirectAdmin "Something amazing" index.html mütləq silinsin!
 
-4) .env serverdə əvvəlcədən qalmalıdır (zip-ə daxil deyil).
-   Nümunə: backend/.env.example
+4) YENİ server:
+   - site-root/.env artıq zip-dədir (DB, JWT, MIGRATE_KEY)
+   - phpMyAdmin: verilənlər bazası $ServerDbName
+   - site-root/database/install.sql IMPORT edin (boş DB)
 
-5) DB patch/migration: serverdə mövcud .env ilə phinx və ya əl ilə SQL patch.
-   Ətraflı: docs/DEPLOY-MIGRATION-AZ.md
+   MÖVCUD server:
+   - .env faylını əvəz ETMƏYİN (JWT və DB şifrəsi köhnə qalmalıdır)
+   - install.sql IMPORT ETMƏYİN (cədvəlləri silir)
+   - Yalnız kodu yeniləyin. Yeni cədvəl üçün database/patches SQL-lərini
+     və ya phinx migrate işlədin. Ətraflı: docs/DEPLOY-MIGRATION-AZ.md
 
-6) İcazələr: storage/ yazıla bilən (775)
+5) İcazələr: storage/ yazıla bilən (775)
 
-7) PHP 8.2+ seçin (DirectAdmin → PHP Selector)
+6) PHP 8.2+ seçin (DirectAdmin → PHP Selector)
 
-8) Test əvvəl: https://$ApiDomain/ping.php
+7) Test əvvəl: https://$ApiDomain/ping.php
    Sonra: https://$ApiDomain/api/health
 
 Demo giriş: admin / admin  |  kassir / kassir
@@ -309,6 +331,12 @@ New-Item -ItemType Directory -Path $DistDir -Force | Out-Null
 New-Item -ItemType Directory -Path $BackendOut -Force | Out-Null
 New-Item -ItemType Directory -Path $FrontendOut -Force | Out-Null
 
+$JwtSecret = New-RandomSecret 56
+if (-not (Get-Variable -Name ServerMigrateKey -ErrorAction SilentlyContinue) -or -not $ServerMigrateKey -or $ServerMigrateKey -eq 'BURAYA_MIGRATE_ACARI') {
+    $ServerMigrateKey = New-RandomSecret 40
+    Write-Host "MIGRATE_KEY avtomatik yaradildi (zip .env icinde)." -ForegroundColor Yellow
+}
+
 # ─── BACKEND ─────────────────────────────────────────────────────────────────
 Write-Step 'Backend: composer install (--no-dev)'
 Push-Location $BackendDir
@@ -318,6 +346,13 @@ try {
 } finally {
     Pop-Location
 }
+
+Write-Step 'Backend: müvəqqəti DB, migration, seed, install.sql'
+$installSqlDir = Join-Path $BackendOut 'database'
+New-Item -ItemType Directory -Path $installSqlDir -Force | Out-Null
+$installSql = Join-Path $installSqlDir 'install.sql'
+$generateSql = Join-Path $BackendDir 'scripts\generate-install-sql.php'
+Invoke-Checked -Exe $PhpExe -CommandArgs @($generateSql, $TempDbName, $installSql) -WorkDir $BackendDir -Label 'generate-install-sql.php'
 
 Write-Step 'Backend: DirectAdmin strukturuna yığılır'
 $siteRoot = Join-Path $BackendOut 'site-root'
@@ -332,17 +367,19 @@ Get-ChildItem -Path $publicHtml -Filter '*.php' -File | Where-Object {
     $Script:BackendPublicSetupExclude -contains $_.Name
 } | Remove-Item -Force
 
-# database/ — install.sql və setup.php zip-ə daxil deyil
+# Köhnə lokal install.sql zip-ə düşməsin; təzə generasiya yazılır.
 $dbInSite = Join-Path $siteRoot 'database'
 if (Test-Path $dbInSite) { Remove-Item $dbInSite -Recurse -Force }
 New-Item -ItemType Directory -Path $dbInSite -Force | Out-Null
 Get-ChildItem (Join-Path $BackendDir 'database') -Force | Where-Object {
-    $Script:BackendDatabaseExclude -notcontains $_.Name
+    $_.Name -ne 'install.sql' -and $_.Name -ne 'setup.php'
 } | ForEach-Object {
     Copy-Item $_.FullName (Join-Path $dbInSite $_.Name) -Recurse -Force
 }
+Copy-Item $installSql (Join-Path $dbInSite 'install.sql') -Force
 
 New-StoragePlaceholders -SiteRoot $siteRoot
+Write-ProductionEnv -Path (Join-Path $siteRoot '.env') -JwtSecret $JwtSecret -MigrateKey $ServerMigrateKey
 
 # Asan upload: hamısı bir public_html-də
 $publicHtmlFull = Join-Path $BackendOut 'public_html_FULL'
