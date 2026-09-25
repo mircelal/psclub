@@ -49,12 +49,16 @@ API əsas URL (Flutter): `http://psclub.test/api` və ya `http://127.0.0.1/psclu
 
 ## DirectAdmin deploy (zip)
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\build-deploy.ps1
+`build-deploy.bat` faylını iki dəfə klikləyin. İlk dəfə `scripts\deploy-config.local.ps1` açılır — DB şifrəsini yazın və bat-ı yenidən işlədin.
+
+Skript lokal MySQL-də müvəqqəti baza yaradır, `install.sql` və production `.env` hazırlayır, sonra zip-ləri yığır.
+
+```bat
+build-deploy.bat
+build-deploy.bat backend
 ```
 
 Çıxış: `dist/psapi-backend.zip` və `dist/ps-frontend.zip` — `OXU-BUNU.txt` içində upload addımları.
-Skriptdə server DB və domainlər dəyişdirilə bilər (`scripts/build-deploy.ps1` başı).
 
 ## API modulları
 

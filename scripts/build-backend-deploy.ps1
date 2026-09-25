@@ -17,7 +17,9 @@ $TempDbName  = 'psclub_deploy_build'
 
 $LocalConfig = Join-Path $PSScriptRoot 'deploy-config.local.ps1'
 if (Test-Path $LocalConfig) { . $LocalConfig }
-if (-not $ServerDbPassword) { throw 'deploy-config.local.ps1 — ServerDbPassword lazımdır' }
+if (-not $ServerDbPassword -or $ServerDbPassword -eq 'BURAYA_SIFRE') {
+    throw 'scripts\deploy-config.local.ps1 içində ServerDbPassword doldurun, sonra build-deploy.bat backend işlədin.'
+}
 
 $RootDir = Split-Path $PSScriptRoot -Parent
 $BackendDir = Join-Path $RootDir 'backend'
@@ -80,8 +82,28 @@ function Copy-BackendTree { param([string]$DestRoot)
     }
 }
 
-$Script:BackendPublicSetupExclude = @('server-setup.php', 'run-migrate.php', 'reset-sales-data.php')
-$Script:BackendDatabaseExclude = @('install.sql', 'setup.php')
+function Write-ProductionEnv([string]$Path, [string]$JwtSecret) {
+    @"
+APP_ENV=production
+APP_DEBUG=false
+APP_URL=https://$ApiDomain
+APP_TIMEZONE=Asia/Baku
+
+DB_HOST=$ServerDbHost
+DB_PORT=3306
+DB_NAME=$ServerDbName
+DB_USER=$ServerDbUser
+DB_PASS=$ServerDbPassword
+
+JWT_SECRET=$JwtSecret
+JWT_TTL=86400
+
+CORS_ORIGIN=https://$WebDomain
+"@ | Set-Content -Path $Path -Encoding UTF8 -NoNewline
+    Add-Content -Path $Path -Value "" -Encoding UTF8
+}
+
+$Script:BackendPublicSetupExclude = @('server-setup.php', 'run-migrate.php', 'reset-sales-data.php', 'setup.php')
 
 function Remove-BackendSetupFiles {
     param([string[]]$Roots)
@@ -91,12 +113,6 @@ function Remove-BackendSetupFiles {
             Get-ChildItem -Path $root -Filter $name -Recurse -File -ErrorAction SilentlyContinue |
                 Remove-Item -Force -ErrorAction SilentlyContinue
         }
-        Get-ChildItem -Path $root -Filter '.env' -Recurse -File -ErrorAction SilentlyContinue |
-            Remove-Item -Force -ErrorAction SilentlyContinue
-        Get-ChildItem -Path $root -Filter 'install.sql' -Recurse -File -ErrorAction SilentlyContinue |
-            Remove-Item -Force -ErrorAction SilentlyContinue
-        Get-ChildItem -Path $root -Filter 'setup.php' -Recurse -File -ErrorAction SilentlyContinue |
-            Remove-Item -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -136,7 +152,7 @@ New-Item -ItemType Directory -Path $DistDir -Force | Out-Null
 if (Test-Path $BackendOut) { Remove-Item $BackendOut -Recurse -Force }
 New-Item -ItemType Directory -Path $BackendOut -Force | Out-Null
 
-$JwtSecret = $null
+$JwtSecret = New-RandomSecret 56
 
 Write-Step 'composer install (--no-dev)'
 Push-Location $BackendDir
@@ -144,6 +160,13 @@ try {
     if (Test-Path 'vendor') { Remove-Item 'vendor' -Recurse -Force -ErrorAction SilentlyContinue }
     Invoke-Checked -Exe $ComposerExe -CommandArgs @('install', '--no-dev', '--optimize-autoloader', '--no-interaction') -WorkDir $BackendDir
 } finally { Pop-Location }
+
+Write-Step 'müvəqqəti DB, migration, seed, install.sql'
+$installSqlDir = Join-Path $BackendOut 'database'
+New-Item -ItemType Directory -Path $installSqlDir -Force | Out-Null
+$installSql = Join-Path $installSqlDir 'install.sql'
+$generateSql = Join-Path $BackendDir 'scripts\generate-install-sql.php'
+Invoke-Checked -Exe $PhpExe -CommandArgs @($generateSql, $TempDbName, $installSql) -WorkDir $BackendDir -Label 'generate-install-sql.php'
 
 Write-Step 'DirectAdmin struktur'
 $siteRoot = Join-Path $BackendOut 'site-root'
@@ -160,10 +183,12 @@ $dbInSite = Join-Path $siteRoot 'database'
 if (Test-Path $dbInSite) { Remove-Item $dbInSite -Recurse -Force }
 New-Item -ItemType Directory -Path $dbInSite -Force | Out-Null
 Get-ChildItem (Join-Path $BackendDir 'database') -Force | Where-Object {
-    $Script:BackendDatabaseExclude -notcontains $_.Name
+    $_.Name -ne 'install.sql' -and $_.Name -ne 'setup.php'
 } | ForEach-Object { Copy-Item $_.FullName (Join-Path $dbInSite $_.Name) -Recurse -Force }
+Copy-Item $installSql (Join-Path $dbInSite 'install.sql') -Force
 
 New-StoragePlaceholders -SiteRoot $siteRoot
+Write-ProductionEnv -Path (Join-Path $siteRoot '.env') -JwtSecret $JwtSecret
 
 $publicHtmlFull = Join-Path $BackendOut 'public_html_FULL'
 New-Item -ItemType Directory -Path $publicHtmlFull -Force | Out-Null
@@ -176,9 +201,9 @@ Remove-BackendSetupFiles -Roots @($publicHtml, $publicHtmlFull, $siteRoot)
 PS Club API — DirectAdmin
 =========================
 1) public_html_FULL/ → public_html/ (və ya site-root + public_html ayrıca)
-2) .env zip-ə daxil deyil — serverdə mövcud .env saxlanılır
-3) DB: database/patches + phinx (install.sql və setup.php zip-də yoxdur)
-4) Test: https://$ApiDomain/ping.php
+2) YENİ server: site-root/.env və database/install.sql istifadə edin
+   MÖVCUD server: .env-i əvəz etməyin, install.sql import etməyin
+3) Test: https://$ApiDomain/ping.php
 "@ | Set-Content (Join-Path $BackendOut 'OXU-BUNU.txt') -Encoding UTF8
 
 Write-Step 'zip'
