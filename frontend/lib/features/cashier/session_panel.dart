@@ -8,6 +8,8 @@ import '../../core/utils/json_parse.dart';
 import '../../core/utils/package_session.dart';
 import '../../core/theme/app_palette.dart';
 import '../../core/theme/app_spacing.dart';
+import '../../core/api/api_client.dart';
+import '../../core/widgets/app_dialog.dart';
 import '../../core/widgets/app_snackbar.dart';
 import '../../core/widgets/section_header.dart';
 import '../../core/widgets/status_badge.dart';
@@ -79,6 +81,12 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
   }
 
   bool get _isCounter => (_session?['session_type'] ?? 'table') == 'counter';
+
+  bool get _isGiftActive {
+    final type = _session?['discount_type'] as String?;
+    final value = jsonToDouble(_session?['discount_value']);
+    return _isCounter && type == 'percent' && value >= 100;
+  }
 
   bool get _mustSettleBeforeClose => widget.lockUntilSettled || _isCounter;
 
@@ -534,6 +542,17 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
         ),
         const SizedBox(height: AppSpacing.md),
         _customerSection(),
+        if (_isCounter) ...[
+          const SizedBox(height: AppSpacing.md),
+          OutlinedButton.icon(
+            onPressed: _actionLoading || _itemBusy ? null : () => _toggleGift(!_isGiftActive),
+            icon: const Icon(Icons.card_giftcard_outlined),
+            label: Text(_isGiftActive ? 'Hədiyyə ✓' : 'Hədiyyə'),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(double.infinity, _actionButtonHeight),
+            ),
+          ),
+        ],
         if (!_isCounter) ...[
           const SizedBox(height: AppSpacing.md),
           OutlinedButton.icon(
@@ -577,7 +596,7 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
               child: FilledButton.icon(
                 onPressed: _actionLoading ? null : _closeSession,
                 icon: const Icon(Icons.payment),
-                label: Text(_isCounter ? 'Ödənişi al' : 'Hesabı bağla'),
+                label: Text(_isGiftActive ? 'Hədiyyəni tamamla' : (_isCounter ? 'Ödənişi al' : 'Hesabı bağla')),
                 style: FilledButton.styleFrom(
                   backgroundColor: payColor,
                   foregroundColor: Colors.white,
@@ -763,7 +782,82 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
     }
   }
 
+  Future<void> _toggleGift(bool on) async {
+    if (_actionLoading || _itemBusy) return;
+    setState(() => _actionLoading = true);
+    try {
+      if (on) {
+        final session = await ref.read(posServiceProvider).setSessionDiscount(
+              widget.sessionId,
+              discountType: 'percent',
+              discountValue: 100,
+              discountAppliesTo: 'all',
+            );
+        _applySession(session);
+      } else {
+        final session = await ref.read(posServiceProvider).clearSessionDiscount(widget.sessionId);
+        _applySession(session);
+      }
+      AppFeedback.success();
+    } catch (e) {
+      AppFeedback.error();
+      if (mounted) showAppSnackBar(context, ApiClient.messageFromError(e), isError: true);
+    } finally {
+      if (mounted) setState(() => _actionLoading = false);
+    }
+  }
+
+  Future<String?> _askGiftNote() async {
+    final noteCtrl = TextEditingController();
+    final ok = await showAppDialog<bool>(
+      context: context,
+      title: 'Hədiyyə qeydi',
+      subtitle: 'Şərhsiz hədiyyə satışı bağlanmır',
+      icon: Icons.comment_outlined,
+      maxWidth: 440,
+      body: AppTextField(controller: noteCtrl, label: 'Şərh'),
+      actions: [
+        OutlinedButton(onPressed: () => Navigator.pop(context, false), child: const Text('Ləğv')),
+        FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Tamamla')),
+      ],
+    );
+    final note = noteCtrl.text.trim();
+    noteCtrl.dispose();
+    if (ok != true) return null;
+    if (note.isEmpty) {
+      if (mounted) showAppSnackBar(context, 'Hədiyyə üçün qeyd yazın', isError: true);
+      return null;
+    }
+    return note;
+  }
+
   Future<void> _closeSession() async {
+    if (_isGiftActive) {
+      final note = await _askGiftNote();
+      if (note == null || !mounted) return;
+      setState(() => _actionLoading = true);
+      try {
+        await ref.read(posServiceProvider).closeSession(
+              widget.sessionId,
+              method: 'cash',
+              cashAmount: 0,
+              cardAmount: 0,
+              giftNote: note,
+            );
+        if (!mounted) return;
+        AppFeedback.success();
+        showAppSnackBar(context, 'Hədiyyə satışı tamamlandı');
+        Navigator.pop(context);
+        widget.onChanged();
+      } catch (e) {
+        AppFeedback.error();
+        if (mounted) showAppSnackBar(context, ApiClient.messageFromError(e), isError: true);
+      } finally {
+        if (mounted) setState(() => _actionLoading = false);
+      }
+      return;
+    }
+
     final closed = await showDialog<bool>(
       context: context,
       barrierColor: Colors.black54,

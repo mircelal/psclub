@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Modules\Customers;
 
 use App\Support\ApiResponse;
+use App\Support\LoyaltyService;
 use App\Support\PhoneNormalizer;
 use PDO;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -13,8 +14,10 @@ use Respect\Validation\Validator as v;
 
 final class CustomersController
 {
-    public function __construct(private readonly PDO $pdo)
-    {
+    public function __construct(
+        private readonly PDO $pdo,
+        private readonly LoyaltyService $loyalty,
+    ) {
     }
 
     public function index(Request $request, Response $response): Response
@@ -207,6 +210,10 @@ final class CustomersController
 
         return ApiResponse::success([
             'customer' => $customer,
+            'loyalty' => [
+                'balance' => $this->loyalty->getBalance($id),
+                'ledger' => $this->loyalty->getLedger($id),
+            ],
             'stats' => [
                 'session_count' => (int) ($stats['session_count'] ?? 0),
                 'closed_session_count' => (int) ($stats['closed_session_count'] ?? 0),

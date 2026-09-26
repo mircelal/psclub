@@ -7,6 +7,7 @@ namespace App\Modules\Orders;
 use App\Modules\Shifts\ShiftService;
 use App\Modules\Stock\StockController;
 use App\Support\ApiResponse;
+use App\Support\DbSchema;
 use App\Support\DiscountCalculator;
 use App\Support\SchemaMigrator;
 use PDO;
@@ -31,8 +32,9 @@ final class OrdersController
         $state = $params['order_state'] ?? null;
         $limit = min(200, max(1, (int) ($params['limit'] ?? 100)));
 
+        $giftSql = DbSchema::hasColumn($this->pdo, 'sessions', 'gift_note') ? 's.gift_note' : 'NULL AS gift_note';
         $sql = "SELECT s.id, s.session_type, s.table_id, s.status, s.order_state, s.opened_at, s.closed_at,
-                       s.time_charge, s.products_total, s.discount, s.total_amount, s.refund_amount, s.admin_note,
+                       s.time_charge, s.products_total, s.discount, s.total_amount, s.refund_amount, s.admin_note, {$giftSql},
                        s.active_seconds, s.hourly_rate_snapshot, s.discount_type, s.discount_value,
                        t.name AS table_name, c.name AS customer_name,
                        p.method AS payment_method, p.cash_amount, p.card_amount,

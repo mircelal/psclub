@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Modules\Promotions;
 
 use App\Support\ApiResponse;
+use App\Support\DbSchema;
 use App\Support\PromotionService;
 use PDO;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -48,11 +49,15 @@ final class PromotionsController
             return ApiResponse::error('Validation failed', 422);
         }
 
+        $scheduleError = $this->scheduleColumnError($body);
+        if ($scheduleError !== null) {
+            return ApiResponse::error($scheduleError, 503);
+        }
+
         $tariffJson = $this->encodeTariffNames($body);
-        $this->pdo->prepare(
-            'INSERT INTO promotions (business_id, name, discount_type, discount_value, applies_to, scope, tariff_names, is_active, valid_from, valid_until, sort_order, created_at, updated_at)
-             VALUES (1, ?, ?, ?, \'time_only\', ?, ?, ?, ?, ?, ?, NOW(), NOW())'
-        )->execute([
+        $columns = 'business_id, name, discount_type, discount_value, applies_to, scope, tariff_names, is_active, valid_from, valid_until, sort_order, created_at, updated_at';
+        $placeholders = '1, ?, ?, ?, \'time_only\', ?, ?, ?, ?, ?, ?, NOW(), NOW()';
+        $params = [
             trim((string) $body['name']),
             $body['discount_type'],
             (float) $body['discount_value'],
@@ -62,7 +67,17 @@ final class PromotionsController
             $this->nullableDate($body['valid_from'] ?? null),
             $this->nullableDate($body['valid_until'] ?? null),
             (int) ($body['sort_order'] ?? 0),
-        ]);
+        ];
+        if ($this->scheduleReady()) {
+            $columns .= ', valid_days, valid_hours';
+            $placeholders .= ', ?, ?';
+            $params[] = PromotionService::encodeValidDays($body['valid_days'] ?? null);
+            $params[] = PromotionService::encodeValidHours($body['valid_hours'] ?? null);
+        }
+
+        $this->pdo->prepare(
+            "INSERT INTO promotions ({$columns}) VALUES ({$placeholders})"
+        )->execute($params);
 
         return ApiResponse::success(['id' => (int) $this->pdo->lastInsertId()], [], 201);
     }
@@ -74,8 +89,16 @@ final class PromotionsController
 
         $fields = [];
         $params = [];
-        foreach (['name', 'discount_type', 'discount_value', 'scope', 'is_active', 'valid_from', 'valid_until', 'sort_order'] as $key) {
+        $scheduleError = $this->scheduleColumnError($body);
+        if ($scheduleError !== null) {
+            return ApiResponse::error($scheduleError, 503);
+        }
+
+        foreach (['name', 'discount_type', 'discount_value', 'scope', 'is_active', 'valid_from', 'valid_until', 'valid_days', 'valid_hours', 'sort_order'] as $key) {
             if (!array_key_exists($key, $body)) {
+                continue;
+            }
+            if (in_array($key, ['valid_days', 'valid_hours'], true) && !$this->scheduleReady()) {
                 continue;
             }
             if ($key === 'is_active') {
@@ -86,6 +109,16 @@ final class PromotionsController
             if (in_array($key, ['valid_from', 'valid_until'], true)) {
                 $fields[] = "{$key} = ?";
                 $params[] = $this->nullableDate($body[$key]);
+                continue;
+            }
+            if ($key === 'valid_days') {
+                $fields[] = 'valid_days = ?';
+                $params[] = PromotionService::encodeValidDays($body[$key]);
+                continue;
+            }
+            if ($key === 'valid_hours') {
+                $fields[] = 'valid_hours = ?';
+                $params[] = PromotionService::encodeValidHours($body[$key]);
                 continue;
             }
             $fields[] = "{$key} = ?";
@@ -163,10 +196,49 @@ final class PromotionsController
         foreach ($rows as &$row) {
             $decoded = json_decode((string) ($row['tariff_names'] ?? '[]'), true);
             $row['tariff_names'] = is_array($decoded) ? $decoded : [];
+            $decodedDays = json_decode((string) ($row['valid_days'] ?? '[]'), true);
+            $row['valid_days'] = is_array($decodedDays) ? $decodedDays : [];
+            $decodedHours = json_decode((string) ($row['valid_hours'] ?? '[]'), true);
+            $row['valid_hours'] = is_array($decodedHours) ? $decodedHours : [];
             $row['is_active'] = (bool) ($row['is_active'] ?? false);
         }
 
         return $rows;
+    }
+
+    /**
+     * @param array<string, mixed> $body
+     */
+    private function scheduleColumnError(array $body): ?string
+    {
+        if ($this->scheduleReady() || !$this->scheduleRequested($body)) {
+            return null;
+        }
+
+        return 'Kampaniya günü üçün miqrasiya işlədin';
+    }
+
+    /**
+     * @param array<string, mixed> $body
+     */
+    private function scheduleRequested(array $body): bool
+    {
+        $days = $body['valid_days'] ?? null;
+        $hours = $body['valid_hours'] ?? null;
+        if (is_array($days) && $days !== []) {
+            return true;
+        }
+        if (is_array($hours) && $hours !== []) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private function scheduleReady(): bool
+    {
+        return DbSchema::hasColumn($this->pdo, 'promotions', 'valid_days')
+            && DbSchema::hasColumn($this->pdo, 'promotions', 'valid_hours');
     }
 
     private function tableExists(): bool

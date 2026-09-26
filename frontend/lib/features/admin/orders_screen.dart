@@ -199,6 +199,8 @@ class _OrderListTile extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text('#${order['id']} • $tableName', style: const TextStyle(fontWeight: FontWeight.w600)),
+                      if ((order['gift_note']?.toString().trim().isNotEmpty ?? false))
+                        Text('Hədiyyə', style: TextStyle(fontSize: 11, color: p.textSecondary, fontWeight: FontWeight.w700)),
                       Text(
                         '$time • ${order['customer_name'] ?? 'Anonim'} • ${_payLabel(order['payment_method'])}',
                         style: TextStyle(fontSize: 11, color: p.textMuted),
@@ -285,6 +287,16 @@ class _OrderBillSummary extends StatelessWidget {
             child: Divider(height: 1),
           ),
           _row(context, 'Ümumi', total, bold: true),
+          if ((order['gift_note']?.toString().trim().isNotEmpty ?? false)) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Hədiyyə qeydi: ${order['gift_note']}',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ),
+          ],
         ],
       ),
     );

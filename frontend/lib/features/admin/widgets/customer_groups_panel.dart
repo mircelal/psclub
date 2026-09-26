@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../core/api/api_client.dart';
 import '../../../core/theme/brand_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/json_parse.dart';
@@ -151,6 +152,100 @@ class CustomerGroupsPanelState extends ConsumerState<CustomerGroupsPanel> {
     }
   }
 
+  Future<void> _showMembers(Map<String, dynamic> group) async {
+    final groupId = jsonToInt(group['id']);
+    final searchCtrl = TextEditingController();
+    var members = <Map<String, dynamic>>[];
+    var results = <Map<String, dynamic>>[];
+    try {
+      members = (await ref.read(posServiceProvider).getGroupMembers(groupId)).cast<Map<String, dynamic>>();
+    } catch (e) {
+      if (mounted) showAppSnackBar(context, ApiClient.messageFromError(e), isError: true);
+      return;
+    }
+    if (!mounted) return;
+
+    await showAppDialog<void>(
+      context: context,
+      title: group['name'] as String? ?? 'Qrup',
+      subtitle: 'Müştəri axtarıb əlavə edin və ya çıxarın',
+      maxWidth: 520,
+      body: StatefulBuilder(
+        builder: (context, setDialogState) {
+          Future<void> search() async {
+            try {
+              final rows = await ref.read(posServiceProvider).searchCustomers(searchCtrl.text.trim());
+              final memberIds = members.map((m) => jsonToInt(m['id'])).toSet();
+              setDialogState(() {
+                results = rows
+                    .cast<Map<String, dynamic>>()
+                    .where((c) => !memberIds.contains(jsonToInt(c['id'])))
+                    .take(12)
+                    .toList();
+              });
+            } catch (e) {
+              if (context.mounted) showAppSnackBar(context, ApiClient.messageFromError(e), isError: true);
+            }
+          }
+
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              AppTextField(controller: searchCtrl, label: 'Müştəri axtar', onSubmitted: (_) => search()),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(onPressed: search, child: const Text('Axtar')),
+              ),
+              ...results.map((c) => ListTile(
+                    dense: true,
+                    title: Text(c['name'] as String? ?? ''),
+                    subtitle: Text(c['phone'] as String? ?? ''),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.add),
+                      onPressed: () async {
+                        try {
+                          members = (await ref.read(posServiceProvider).changeGroupMembers(groupId, add: [jsonToInt(c['id'])]))
+                              .cast<Map<String, dynamic>>();
+                          await search();
+                          await reload();
+                        } catch (e) {
+                          if (context.mounted) showAppSnackBar(context, ApiClient.messageFromError(e), isError: true);
+                        }
+                      },
+                    ),
+                  )),
+              const Divider(),
+              if (members.isEmpty) const Text('Bu qrupda müştəri yoxdur'),
+              ...members.map((m) => ListTile(
+                    dense: true,
+                    title: Text(m['name'] as String? ?? ''),
+                    subtitle: Text(m['phone'] as String? ?? ''),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.remove_circle_outline),
+                      onPressed: () async {
+                        try {
+                          members = (await ref.read(posServiceProvider).changeGroupMembers(groupId, remove: [jsonToInt(m['id'])]))
+                              .cast<Map<String, dynamic>>();
+                          setDialogState(() {});
+                          await reload();
+                        } catch (e) {
+                          if (context.mounted) showAppSnackBar(context, ApiClient.messageFromError(e), isError: true);
+                        }
+                      },
+                    ),
+                  )),
+            ],
+          );
+        },
+      ),
+      actions: [
+        FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Bağla')),
+      ],
+    );
+    searchCtrl.dispose();
+  }
+
   String _discountLabel(Map<String, dynamic> g) {
     final type = g['discount_type'] as String? ?? 'percent';
     final value = jsonToDouble(g['discount_value']);
@@ -201,6 +296,11 @@ class CustomerGroupsPanelState extends ConsumerState<CustomerGroupsPanel> {
                     style: TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 12),
                   ),
                 ),
+              IconButton(
+                tooltip: 'Müştərilər',
+                icon: const Icon(Icons.person_add_alt_1_outlined, size: 20),
+                onPressed: () => _showMembers(g),
+              ),
               IconButton(
                 icon: const Icon(Icons.edit_outlined, size: 20),
                 onPressed: () => _showForm(group: g),

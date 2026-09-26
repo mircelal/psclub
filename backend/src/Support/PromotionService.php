@@ -13,6 +13,7 @@ final class PromotionService
     public function __construct(
         private readonly PDO $pdo,
         private readonly CustomerGroupService $customerGroups,
+        private readonly ?SpendDiscountService $spendDiscounts = null,
     ) {
     }
 
@@ -34,7 +35,7 @@ final class PromotionService
         );
         $stmt->execute([$businessId]);
 
-        return $stmt->fetchAll() ?: [];
+        return self::filterBySchedule($stmt->fetchAll() ?: []);
     }
 
     /**
@@ -65,7 +66,7 @@ final class PromotionService
     }
 
     /**
-     * @return array{amount: float, promotion: ?array<string, mixed>, customer_group: ?array<string, mixed>}
+     * @return array{amount: float, promotion: ?array<string, mixed>, customer_group: ?array<string, mixed>, spend_rule: ?array<string, mixed>}
      */
     public function resolveDiscount(
         array $session,
@@ -82,11 +83,11 @@ final class PromotionService
             $value = (float) ($session['discount_value'] ?? 0);
             $amount = DiscountCalculator::amount($base, (string) $discountType, $value);
 
-            return ['amount' => $amount, 'promotion' => null, 'customer_group' => null];
+            return ['amount' => $amount, 'promotion' => null, 'customer_group' => null, 'spend_rule' => null];
         }
 
         if ($manualDiscount > 0) {
-            return ['amount' => min($subtotal, $manualDiscount), 'promotion' => null, 'customer_group' => null];
+            return ['amount' => min($subtotal, $manualDiscount), 'promotion' => null, 'customer_group' => null, 'spend_rule' => null];
         }
 
         $customerId = isset($session['customer_id']) ? (int) $session['customer_id'] : 0;
@@ -108,15 +109,27 @@ final class PromotionService
             );
         }
 
-        if ($group !== null && $groupAmount >= $promoAmount) {
-            return ['amount' => $groupAmount, 'promotion' => null, 'customer_group' => $group];
+        $spendResolved = $this->spendRules()->resolve(
+            $customerId > 0 ? $customerId : null,
+            $timeCharge,
+            $productsTotal
+        );
+        $spendAmount = $spendResolved['amount'];
+        $spendRule = $spendResolved['rule'];
+
+        if ($group !== null && $groupAmount >= $promoAmount && $groupAmount >= $spendAmount) {
+            return ['amount' => $groupAmount, 'promotion' => null, 'customer_group' => $group, 'spend_rule' => null];
         }
 
-        if ($promo !== null && $promoAmount > 0) {
-            return ['amount' => $promoAmount, 'promotion' => $promo, 'customer_group' => null];
+        if ($promo !== null && $promoAmount >= $spendAmount && $promoAmount > 0) {
+            return ['amount' => $promoAmount, 'promotion' => $promo, 'customer_group' => null, 'spend_rule' => null];
         }
 
-        return ['amount' => 0.0, 'promotion' => null, 'customer_group' => null];
+        if ($spendRule !== null && $spendAmount > 0) {
+            return ['amount' => $spendAmount, 'promotion' => null, 'customer_group' => null, 'spend_rule' => $spendRule];
+        }
+
+        return ['amount' => 0.0, 'promotion' => null, 'customer_group' => null, 'spend_rule' => null];
     }
 
     /**
@@ -144,14 +157,14 @@ final class PromotionService
     /**
      * @param array<string, mixed> $user
      */
-    public function validateManualDiscount(array $user, string $type, float $value, float $base): ?string
+    public function validateManualDiscount(array $user, string $type, float $value, float $base, bool $allowFull = false): ?string
     {
         if ($value < 0) {
             return 'Endirim mənfi ola bilməz';
         }
 
         if (($user['role'] ?? '') !== 'admin') {
-            if ($type === 'percent' && $value > self::CASHIER_MAX_PERCENT) {
+            if (!$allowFull && $type === 'percent' && $value > self::CASHIER_MAX_PERCENT) {
                 return 'Kassir üçün maksimum endirim ' . (int) self::CASHIER_MAX_PERCENT . '%';
             }
             if ($type === 'fixed' && $value > $base) {
@@ -188,13 +201,166 @@ final class PromotionService
         return false;
     }
 
+    /**
+     * @param list<array<string, mixed>> $rows
+     * @return list<array<string, mixed>>
+     */
+    public static function filterBySchedule(array $rows, ?\DateTimeInterface $now = null): array
+    {
+        $now = $now ?? new \DateTimeImmutable('now');
+        $out = [];
+        foreach ($rows as $row) {
+            if (self::isWithinTimeWindow($row, $now)) {
+                $out[] = $row;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param array<string, mixed> $promo
+     */
+    public static function isWithinTimeWindow(array $promo, \DateTimeInterface $now): bool
+    {
+        $days = self::decodeJsonList($promo['valid_days'] ?? null);
+        if ($days !== []) {
+            $weekday = (int) $now->format('N') - 1;
+            $normalized = array_map(static fn ($d) => (int) $d, $days);
+            if (!in_array($weekday, $normalized, true)) {
+                return false;
+            }
+        }
+
+        $hours = self::decodeJsonList($promo['valid_hours'] ?? null);
+        if ($hours === []) {
+            return true;
+        }
+
+        $current = (int) $now->format('H') * 60 + (int) $now->format('i');
+        foreach ($hours as $range) {
+            if (!is_array($range)) {
+                continue;
+            }
+            $from = self::parseClockMinutes($range['from'] ?? null);
+            $until = self::parseClockMinutes($range['until'] ?? null);
+            if ($from === null || $until === null) {
+                continue;
+            }
+            if ($from <= $until) {
+                if ($current >= $from && $current <= $until) {
+                    return true;
+                }
+            } elseif ($current >= $from || $current <= $until) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Keep weekday 0 (Monday). Bare array_filter() drops it.
+     *
+     * @param mixed $value
+     */
+    public static function encodeValidDays(mixed $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if (is_string($value)) {
+            $decoded = json_decode($value, true);
+            $value = is_array($decoded) ? $decoded : [];
+        }
+        if (!is_array($value)) {
+            return null;
+        }
+        $mapped = array_map(static fn ($v) => (int) $v, $value);
+        $clean = array_values(array_unique(array_filter($mapped, static fn ($v) => $v >= 0 && $v <= 6)));
+        if ($clean === []) {
+            return null;
+        }
+
+        return json_encode($clean, JSON_UNESCAPED_UNICODE);
+    }
+
+    /**
+     * @param mixed $value
+     */
+    public static function encodeValidHours(mixed $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if (is_string($value)) {
+            return $value;
+        }
+        if (!is_array($value)) {
+            return null;
+        }
+        $clean = [];
+        foreach ($value as $range) {
+            if (!is_array($range)) {
+                continue;
+            }
+            $from = self::parseClockMinutes($range['from'] ?? null);
+            $until = self::parseClockMinutes($range['until'] ?? null);
+            if ($from === null || $until === null) {
+                continue;
+            }
+            $clean[] = [
+                'from' => sprintf('%02d:%02d', intdiv($from, 60), $from % 60),
+                'until' => sprintf('%02d:%02d', intdiv($until, 60), $until % 60),
+            ];
+        }
+        if ($clean === []) {
+            return null;
+        }
+
+        return json_encode($clean, JSON_UNESCAPED_UNICODE);
+    }
+
+    public static function parseClockMinutes(mixed $time): ?int
+    {
+        if ($time === null || $time === '') {
+            return null;
+        }
+        if (!preg_match('/^(\d{1,2}):(\d{2})$/', trim((string) $time), $m)) {
+            return null;
+        }
+        $h = (int) $m[1];
+        $min = (int) $m[2];
+        if ($h > 23 || $min > 59) {
+            return null;
+        }
+
+        return $h * 60 + $min;
+    }
+
+    /**
+     * @return list<mixed>
+     */
+    private static function decodeJsonList(mixed $raw): array
+    {
+        if (is_array($raw)) {
+            return $raw;
+        }
+        if ($raw === null || $raw === '') {
+            return [];
+        }
+        $decoded = json_decode((string) $raw, true);
+
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    private function spendRules(): SpendDiscountService
+    {
+        return $this->spendDiscounts ?? new SpendDiscountService($this->pdo);
+    }
+
     private function hasPromotionsTable(): bool
     {
-        $stmt = $this->pdo->query(
-            "SELECT 1 FROM information_schema.TABLES
-             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'promotions' LIMIT 1"
-        );
-
-        return (bool) $stmt->fetchColumn();
+        return DbSchema::hasTable($this->pdo, 'promotions');
     }
 }

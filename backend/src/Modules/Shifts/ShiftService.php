@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Modules\Shifts;
 
+use App\Support\DbSchema;
 use PDO;
 
 final class ShiftService
@@ -124,6 +125,7 @@ final class ShiftService
         $totals = $this->liveTotals($shift);
         $shift['totals'] = $totals;
         $shift['movements'] = $this->getMovements((int) $shift['id']);
+        $shift['activity'] = $this->getShiftActivity($shift);
 
         return $shift;
     }
@@ -138,9 +140,10 @@ final class ShiftService
 
         $activity = [];
 
+        $giftSelect = DbSchema::hasColumn($this->pdo, 'sessions', 'gift_note') ? ', s.gift_note' : '';
         $sessStmt = $this->pdo->prepare(
             'SELECT s.id, s.session_type, s.closed_at, s.time_charge, s.products_total,
-                    s.discount, s.total_amount, s.table_id,
+                    s.discount, s.total_amount, s.table_id' . $giftSelect . ',
                     t.name AS table_name,
                     p.method AS payment_method, p.cash_amount, p.card_amount, p.created_at AS paid_at
              FROM sessions s
@@ -335,6 +338,10 @@ final class ShiftService
         }
         if ($discount > 0) {
             $lines[] = ['label' => 'Endirim', 'amount' => -$discount];
+        }
+        $giftNote = trim((string) ($session['gift_note'] ?? ''));
+        if ($giftNote !== '') {
+            $lines[] = ['label' => 'Hədiyyə: ' . $giftNote, 'amount' => null];
         }
         $payParts = [];
         if ($cash > 0) {

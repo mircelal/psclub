@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import '../../core/api/api_client.dart';
 import '../../core/settings/app_settings.dart';
 import '../../core/theme/admin_theme.dart';
 import '../../core/theme/app_spacing.dart';
@@ -32,6 +33,7 @@ class _CustomerProfileScreenState extends ConsumerState<CustomerProfileScreen> {
   bool _loading = true;
   Map<String, dynamic>? _customer;
   Map<String, dynamic>? _stats;
+  Map<String, dynamic>? _loyalty;
   List<Map<String, dynamic>> _sessions = [];
   String? _error;
 
@@ -52,11 +54,13 @@ class _CustomerProfileScreenState extends ConsumerState<CustomerProfileScreen> {
       final data = await ref.read(posServiceProvider).getCustomerProfile(widget.customerId);
       _customer = data['customer'] as Map<String, dynamic>?;
       _stats = data['stats'] as Map<String, dynamic>?;
+      _loyalty = data['loyalty'] as Map<String, dynamic>?;
       _sessions = (data['sessions'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
     } catch (e) {
       _error = e.toString();
       _customer = null;
       _stats = null;
+      _loyalty = null;
       _sessions = [];
     }
     if (mounted) setState(() => _loading = false);
@@ -70,13 +74,21 @@ class _CustomerProfileScreenState extends ConsumerState<CustomerProfileScreen> {
     final phoneCtrl = TextEditingController(text: PhoneUtils.fieldValue(stored: customer['phone'] as String?));
     final emailCtrl = TextEditingController(text: customer['email'] as String? ?? '');
     final notesCtrl = TextEditingController(text: customer['notes'] as String? ?? '');
+    List<dynamic> groups = [];
+    var groupsLoaded = false;
+    try {
+      groups = await ref.read(posServiceProvider).getActiveCustomerGroups();
+      groupsLoaded = true;
+    } catch (_) {}
+    int? groupId = jsonToIntOrNull(customer['customer_group_id']);
 
     final ok = await showAppDialog<bool>(
       context: context,
       title: 'Müştərini redaktə et',
       icon: Icons.person_outline,
       maxWidth: 480,
-      body: Column(
+      body: StatefulBuilder(
+        builder: (context, setDialogState) => Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           AppTextField(controller: nameCtrl, label: 'Ad soyad', prefixIcon: Icons.badge_outlined),
@@ -85,8 +97,24 @@ class _CustomerProfileScreenState extends ConsumerState<CustomerProfileScreen> {
           const SizedBox(height: AppSpacing.lg),
           AppTextField(controller: emailCtrl, label: 'E-poçt (istəyə bağlı)', prefixIcon: Icons.email_outlined),
           const SizedBox(height: AppSpacing.lg),
+          if (groups.isNotEmpty)
+            DropdownButtonFormField<int?>(
+              value: groupId,
+              decoration: const InputDecoration(labelText: 'Endirim qrupu'),
+              items: [
+                const DropdownMenuItem<int?>(value: null, child: Text('Qrup yoxdur')),
+                for (final raw in groups)
+                  DropdownMenuItem<int?>(
+                    value: jsonToInt((raw as Map)['id']),
+                    child: Text('${raw['name']}'),
+                  ),
+              ],
+              onChanged: (v) => setDialogState(() => groupId = v),
+            ),
+          if (groups.isNotEmpty) const SizedBox(height: AppSpacing.lg),
           AppTextField(controller: notesCtrl, label: 'Qeyd (istəyə bağlı)'),
         ],
+      ),
       ),
       actions: [
         OutlinedButton(onPressed: () => Navigator.pop(context, false), child: const Text('Ləğv')),
@@ -129,6 +157,7 @@ class _CustomerProfileScreenState extends ConsumerState<CustomerProfileScreen> {
         'phone': phone,
         if (email.isNotEmpty) 'email': email,
         if (notes.isNotEmpty) 'notes': notes,
+        if (groupsLoaded) 'customer_group_id': groupId,
       });
       await _load();
       widget.onUpdated?.call();
@@ -141,6 +170,175 @@ class _CustomerProfileScreenState extends ConsumerState<CustomerProfileScreen> {
           isError: true,
         );
       }
+    }
+  }
+
+  Future<void> _grantBonus() async {
+    var kind = 'hours';
+    final hoursCtrl = TextEditingController();
+    final minutesCtrl = TextEditingController();
+    final walletCtrl = TextEditingController();
+    final noteCtrl = TextEditingController();
+
+    final ok = await showAppDialog<bool>(
+      context: context,
+      title: 'Bonus əlavə et',
+      icon: Icons.card_giftcard_outlined,
+      maxWidth: 440,
+      body: StatefulBuilder(
+        builder: (context, setDialogState) {
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SegmentedButton<String>(
+                segments: const [
+                  ButtonSegment(value: 'hours', label: Text('Saat balansı')),
+                  ButtonSegment(value: 'wallet', label: Text('Endirim balansı')),
+                ],
+                selected: {kind},
+                onSelectionChanged: (s) => setDialogState(() => kind = s.first),
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              if (kind == 'hours')
+                Row(
+                  children: [
+                    Expanded(
+                      child: AppTextField(controller: hoursCtrl, label: 'Saat', keyboardType: TextInputType.number),
+                    ),
+                    const SizedBox(width: AppSpacing.md),
+                    Expanded(
+                      child: AppTextField(controller: minutesCtrl, label: 'Dəqiqə', keyboardType: TextInputType.number),
+                    ),
+                  ],
+                )
+              else
+                AppTextField(
+                  controller: walletCtrl,
+                  label: 'Məbləğ (₼)',
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                ),
+              const SizedBox(height: AppSpacing.md),
+              AppTextField(controller: noteCtrl, label: 'Qeyd (istəyə bağlı)'),
+            ],
+          );
+        },
+      ),
+      actions: [
+        OutlinedButton(onPressed: () => Navigator.pop(context, false), child: const Text('Ləğv')),
+        FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Əlavə et')),
+      ],
+    );
+
+    final hours = int.tryParse(hoursCtrl.text.trim()) ?? 0;
+    final minutes = int.tryParse(minutesCtrl.text.trim()) ?? 0;
+    final wallet = double.tryParse(walletCtrl.text.replaceAll(',', '.')) ?? 0;
+    final note = noteCtrl.text.trim();
+    hoursCtrl.dispose();
+    minutesCtrl.dispose();
+    walletCtrl.dispose();
+    noteCtrl.dispose();
+    if (ok != true || !mounted) return;
+
+    final value = kind == 'hours' ? (hours * 60 + minutes).toDouble() : wallet;
+    if (value <= 0) {
+      showAppSnackBar(context, 'Məbləğ daxil edin', isError: true);
+      return;
+    }
+
+    try {
+      final data = await ref.read(posServiceProvider).grantCustomerLoyalty(
+            widget.customerId,
+            kind: kind,
+            value: value,
+            note: note.isEmpty ? null : note,
+          );
+      setState(() => _loyalty = data);
+      if (mounted) showAppSnackBar(context, 'Bonus əlavə edildi');
+    } catch (e) {
+      if (mounted) showAppSnackBar(context, ApiClient.messageFromError(e), isError: true);
+    }
+  }
+
+  Future<void> _adjustEntry(Map<String, dynamic> entry, {required bool remove}) async {
+    final minutes = jsonToInt(entry['minutes_delta']);
+    final wallet = jsonToDouble(entry['wallet_delta']);
+    final isHours = minutes != 0;
+    final kind = isHours ? 'hours' : 'wallet';
+    var delta = isHours ? -minutes.toDouble() : -wallet;
+    var note = remove ? 'Bonus silindi' : '';
+
+    if (!remove) {
+      final hoursCtrl = TextEditingController(text: '${minutes ~/ 60}');
+      final minutesCtrl = TextEditingController(text: '${minutes.abs() % 60}');
+      final walletCtrl = TextEditingController(text: wallet.abs().toStringAsFixed(2));
+      final noteCtrl = TextEditingController();
+      final ok = await showAppDialog<bool>(
+        context: context,
+        title: 'Bonusu düzəlt',
+        maxWidth: 440,
+        body: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (isHours)
+              Row(
+                children: [
+                  Expanded(child: AppTextField(controller: hoursCtrl, label: 'Saat', keyboardType: TextInputType.number)),
+                  const SizedBox(width: AppSpacing.md),
+                  Expanded(child: AppTextField(controller: minutesCtrl, label: 'Dəqiqə', keyboardType: TextInputType.number)),
+                ],
+              )
+            else
+              AppTextField(
+                controller: walletCtrl,
+                label: 'Məbləğ (₼)',
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              ),
+            const SizedBox(height: AppSpacing.md),
+            AppTextField(controller: noteCtrl, label: 'Qeyd'),
+          ],
+        ),
+        actions: [
+          OutlinedButton(onPressed: () => Navigator.pop(context, false), child: const Text('Ləğv')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Saxla')),
+        ],
+      );
+      note = noteCtrl.text.trim();
+      if (ok == true) {
+        if (isHours) {
+          final next = (int.tryParse(hoursCtrl.text.trim()) ?? 0) * 60 + (int.tryParse(minutesCtrl.text.trim()) ?? 0);
+          delta = (next - (minutes < 0 ? 0 : minutes)).toDouble();
+        } else {
+          final next = double.tryParse(walletCtrl.text.replaceAll(',', '.')) ?? 0;
+          delta = next - (wallet < 0 ? 0 : wallet);
+        }
+      }
+      hoursCtrl.dispose();
+      minutesCtrl.dispose();
+      walletCtrl.dispose();
+      noteCtrl.dispose();
+      if (ok != true || !mounted) return;
+    }
+
+    if (note.isEmpty) {
+      showAppSnackBar(context, 'Qeyd yazın', isError: true);
+      return;
+    }
+    if (delta == 0) {
+      showAppSnackBar(context, 'Məbləğ dəyişmədi', isError: true);
+      return;
+    }
+
+    try {
+      final data = await ref.read(posServiceProvider).adjustCustomerLoyalty(
+            widget.customerId,
+            kind: kind,
+            delta: delta,
+            note: note,
+          );
+      setState(() => _loyalty = data);
+      if (mounted) showAppSnackBar(context, remove ? 'Bonus silindi' : 'Bonus yeniləndi');
+    } catch (e) {
+      if (mounted) showAppSnackBar(context, ApiClient.messageFromError(e), isError: true);
     }
   }
 
@@ -192,6 +390,13 @@ class _CustomerProfileScreenState extends ConsumerState<CustomerProfileScreen> {
                           _ProfileHeader(customer: customer),
                           const SizedBox(height: AppSpacing.xl),
                           if (stats != null) _StatsGrid(stats: stats),
+                          const SizedBox(height: AppSpacing.xl),
+                          _LoyaltySection(
+                            loyalty: _loyalty,
+                            onGrant: _grantBonus,
+                            onEdit: (entry) => _adjustEntry(entry, remove: false),
+                            onDelete: (entry) => _adjustEntry(entry, remove: true),
+                          ),
                           const SizedBox(height: AppSpacing.xl),
                           Text('Sessiyalar və alışlar', style: Theme.of(context).textTheme.titleMedium),
                           const SizedBox(height: AppSpacing.md),
@@ -528,6 +733,88 @@ class _SessionCard extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _LoyaltySection extends StatelessWidget {
+  const _LoyaltySection({
+    required this.loyalty,
+    required this.onGrant,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  final Map<String, dynamic>? loyalty;
+  final VoidCallback onGrant;
+  final void Function(Map<String, dynamic> entry) onEdit;
+  final void Function(Map<String, dynamic> entry) onDelete;
+
+  bool _canEdit(Map<String, dynamic> entry) {
+    final type = entry['entry_type'] as String? ?? '';
+    if (type != 'admin_hours' && type != 'admin_wallet' && type != 'adjust') return false;
+    return jsonToInt(entry['minutes_delta']) > 0 || jsonToDouble(entry['wallet_delta']) > 0;
+  }
+
+  String _label(Map<String, dynamic> entry) {
+    final type = entry['entry_type'] as String? ?? '';
+    final minutes = jsonToInt(entry['minutes_delta']);
+    final wallet = jsonToDouble(entry['wallet_delta']);
+    final hours = (minutes / 60).toStringAsFixed(1);
+    return switch (type) {
+      'admin_hours' => 'Admin: +$hours saat',
+      'admin_wallet' => 'Admin: +${wallet.toStringAsFixed(2)} ₼',
+      'adjust' => minutes != 0 ? 'Düzəliş: $hours saat' : 'Düzəliş: ${wallet.toStringAsFixed(2)} ₼',
+      'redeem_hours' => 'İstifadə: $hours saat',
+      'redeem_wallet' => 'İstifadə: ${wallet.toStringAsFixed(2)} ₼',
+      _ => entry['note'] as String? ?? type,
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final balance = loyalty?['balance'] as Map<String, dynamic>? ?? {};
+    final ledger = (loyalty?['ledger'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+    final bonusMinutes = jsonToInt(balance['bonus_minutes']);
+    final bonusWallet = jsonToDouble(balance['bonus_wallet']);
+
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.xl),
+      decoration: CashierTheme.elevatedCardDecoration(context),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(child: Text('Loyallıq balansı', style: Theme.of(context).textTheme.titleMedium)),
+              FilledButton.tonalIcon(
+                onPressed: onGrant,
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Bonus yaz'),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          Text('Saat balansı: ${(bonusMinutes / 60).toStringAsFixed(1)} saat ($bonusMinutes dəq)'),
+          const SizedBox(height: 4),
+          Text('Endirim balansı: ${bonusWallet.toStringAsFixed(2)} ₼'),
+          if (ledger.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.lg),
+            Text('Son əməliyyatlar', style: Theme.of(context).textTheme.titleSmall),
+            ...ledger.take(8).map((entry) {
+              return Row(
+                children: [
+                  Expanded(child: Text(_label(entry), style: Theme.of(context).textTheme.bodySmall)),
+                  if (_canEdit(entry)) ...[
+                    TextButton(onPressed: () => onEdit(entry), child: const Text('Düzəliş')),
+                    TextButton(onPressed: () => onDelete(entry), child: const Text('Sil')),
+                  ],
+                ],
+              );
+            }),
+          ],
+        ],
+      ),
     );
   }
 }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:printing/printing.dart';
@@ -10,6 +11,8 @@ import '../../core/feedback/app_feedback.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_palette.dart';
 import '../../core/theme/app_spacing.dart';
+import '../../core/api/api_client.dart';
+import '../../core/utils/json_parse.dart';
 import '../../core/widgets/app_dialog.dart';
 import '../../core/widgets/money_text.dart';
 import '../../services/pos_service.dart';
@@ -41,7 +44,10 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
   bool _loading = false;
   bool _loadingBill = true;
   Map<String, dynamic>? _receipt;
+  Map<String, dynamic>? _session;
   SessionBillSnapshot? _bill;
+  bool _useBonusWallet = false;
+  bool _useBonusMinutes = false;
 
   @override
   void initState() {
@@ -66,24 +72,60 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
       );
       if (mounted) {
         setState(() {
+          _session = session;
           _bill = live;
           _loadingBill = false;
-          _cashCtrl.text = live.totalAmount.toStringAsFixed(2);
-          _cardCtrl.text = '0.00';
         });
+        _syncPayableFields();
       }
     } catch (e) {
       if (mounted) {
         setState(() => _loadingBill = false);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ApiClient.messageFromError(e))));
       }
+    }
+  }
+
+  double get _bonusWallet => jsonToDouble(_session?['customer_bonus_wallet']);
+
+  int get _bonusMinutes => jsonToInt(_session?['customer_bonus_minutes']);
+
+  double get _payable {
+    final base = _bill?.totalAmount ?? 0;
+    var credit = 0.0;
+    if (_useBonusWallet) {
+      credit += math.min(_bonusWallet, math.max(0, base - credit));
+    }
+    if (_useBonusMinutes && !widget.isCounter && _bill != null) {
+      final rate = jsonToDouble(_session?['hourly_rate_snapshot']);
+      if (rate > 0) {
+        final timeLeft = math.max(0, _bill!.timeCharge - math.min(_bill!.discount, _bill!.timeCharge));
+        final minuteMoney = math.min(timeLeft, _bonusMinutes * rate / 60);
+        credit += math.min(minuteMoney, math.max(0, base - credit));
+      }
+    }
+    return math.max(0, base - credit);
+  }
+
+  void _syncPayableFields() {
+    final total = _payable;
+    if (_method == 'card') {
+      _cashCtrl.text = '0.00';
+      _cardCtrl.text = total.toStringAsFixed(2);
+    } else if (_method == 'mixed') {
+      _cashCtrl.text = total.toStringAsFixed(2);
+      _cardCtrl.text = '0.00';
+    } else {
+      _cashCtrl.text = total.toStringAsFixed(2);
+      _cardCtrl.text = '0.00';
     }
   }
 
   void _syncMixed() {
     if (_method != 'mixed' || _bill == null) return;
     final cash = double.tryParse(_cashCtrl.text) ?? 0;
-    final remaining = (_bill!.totalAmount - cash).clamp(0, _bill!.totalAmount);
+    final payable = _payable;
+    final remaining = (payable - cash).clamp(0, payable);
     if (_cardCtrl.text != remaining.toStringAsFixed(2)) {
       _cardCtrl.text = remaining.toStringAsFixed(2);
     }
@@ -125,7 +167,7 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
       await _loadBill();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ApiClient.messageFromError(e))));
       }
       setState(() => _loadingBill = false);
     }
@@ -142,6 +184,8 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
             method: _method,
             cashAmount: cash,
             cardAmount: card,
+            redeemBonusWallet: _useBonusWallet ? _bonusWallet : 0,
+            redeemBonusMinutes: _useBonusMinutes && !widget.isCounter ? _bonusMinutes : 0,
           );
       refreshCurrentShift(ref);
       setState(() {
@@ -153,7 +197,7 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
       setState(() => _loading = false);
       AppFeedback.error();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ApiClient.messageFromError(e))));
       }
     }
   }
@@ -233,7 +277,7 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
     }
 
     final bill = _bill;
-    final total = bill?.totalAmount ?? 0;
+    final total = _payable;
 
     final screen = MediaQuery.sizeOf(context);
     final dialogWidth = (screen.width * 0.5).clamp(420.0, 560.0);
@@ -308,6 +352,35 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
                               icon: const Icon(Icons.local_offer_outlined),
                               label: const Text('Əl ilə endirim'),
                             ),
+                          ],
+                          if (_bonusMinutes > 0 || _bonusWallet > 0) ...[
+                            const SizedBox(height: AppSpacing.lg),
+                            Text('Loyallıq bonusu', style: Theme.of(context).textTheme.titleMedium),
+                            if (_bonusMinutes > 0 && !widget.isCounter)
+                              SwitchListTile(
+                                contentPadding: EdgeInsets.zero,
+                                title: Text('Saat balansı (${(_bonusMinutes / 60).toStringAsFixed(1)} saat)'),
+                                value: _useBonusMinutes,
+                                onChanged: _loading
+                                    ? null
+                                    : (v) => setState(() {
+                                          _useBonusMinutes = v;
+                                          _syncPayableFields();
+                                        }),
+                              ),
+                            if (_bonusWallet > 0)
+                              SwitchListTile(
+                                contentPadding: EdgeInsets.zero,
+                                title: Text('Endirim balansı (${_bonusWallet.toStringAsFixed(2)} ₼)'),
+                                subtitle: const Text('Bonusla ödə'),
+                                value: _useBonusWallet,
+                                onChanged: _loading
+                                    ? null
+                                    : (v) => setState(() {
+                                          _useBonusWallet = v;
+                                          _syncPayableFields();
+                                        }),
+                              ),
                           ],
                           const SizedBox(height: AppSpacing.xl),
                           Container(

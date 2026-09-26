@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Modules\Customers;
 
 use App\Support\ApiResponse;
+use App\Support\CustomerGroupService;
+use App\Support\DbSchema;
 use PDO;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -12,8 +14,10 @@ use Respect\Validation\Validator as v;
 
 final class CustomerGroupsController
 {
-    public function __construct(private readonly PDO $pdo)
-    {
+    public function __construct(
+        private readonly PDO $pdo,
+        private readonly CustomerGroupService $groups,
+    ) {
     }
 
     public function index(Request $request, Response $response): Response
@@ -121,6 +125,32 @@ final class CustomerGroupsController
         return ApiResponse::success(['updated' => true]);
     }
 
+    public function members(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->tableExists()) {
+            return ApiResponse::error('Müştəri qrupları mövcud deyil — miqrasiya işlədin', 503);
+        }
+
+        return ApiResponse::success($this->groups->listMembers((int) $args['id']));
+    }
+
+    public function changeMembers(Request $request, Response $response, array $args): Response
+    {
+        $body = (array) $request->getParsedBody();
+        $add = is_array($body['add'] ?? null) ? $body['add'] : [];
+        $remove = is_array($body['remove'] ?? null) ? $body['remove'] : [];
+
+        try {
+            $this->groups->changeMembers((int) $args['id'], $add, $remove);
+        } catch (\RuntimeException $e) {
+            return ApiResponse::error($e->getMessage(), 503);
+        }
+
+        return ApiResponse::success([
+            'members' => $this->groups->listMembers((int) $args['id']),
+        ]);
+    }
+
     public function destroy(Request $request, Response $response, array $args): Response
     {
         $id = (int) $args['id'];
@@ -149,11 +179,6 @@ final class CustomerGroupsController
 
     private function tableExists(): bool
     {
-        $stmt = $this->pdo->query(
-            "SELECT 1 FROM information_schema.TABLES
-             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'customer_groups' LIMIT 1"
-        );
-
-        return (bool) $stmt->fetchColumn();
+        return DbSchema::hasTable($this->pdo, 'customer_groups');
     }
 }

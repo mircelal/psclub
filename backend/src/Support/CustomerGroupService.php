@@ -96,13 +96,71 @@ final class CustomerGroupService
         return $this->findForCustomer($customerId > 0 ? $customerId : null);
     }
 
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function listMembers(int $groupId): array
+    {
+        if ($groupId <= 0 || !$this->hasTable()) {
+            return [];
+        }
+
+        $stmt = $this->pdo->prepare(
+            'SELECT id, name, phone, email
+             FROM customers
+             WHERE customer_group_id = ? AND is_active = 1
+             ORDER BY name'
+        );
+        $stmt->execute([$groupId]);
+
+        return $stmt->fetchAll() ?: [];
+    }
+
+    /**
+     * @param list<int> $add
+     * @param list<int> $remove
+     */
+    public function changeMembers(int $groupId, array $add, array $remove): void
+    {
+        if ($groupId <= 0 || !$this->hasTable()) {
+            throw new \RuntimeException('Müştəri qrupları mövcud deyil — miqrasiya işlədin');
+        }
+
+        $now = date('Y-m-d H:i:s');
+        $removeStmt = $this->pdo->prepare(
+            'UPDATE customers SET customer_group_id = NULL, updated_at = ? WHERE id = ? AND customer_group_id = ?'
+        );
+        foreach ($this->uniqueIds($remove) as $id) {
+            $removeStmt->execute([$now, $id, $groupId]);
+        }
+
+        $addStmt = $this->pdo->prepare(
+            'UPDATE customers SET customer_group_id = ?, updated_at = ? WHERE id = ? AND is_active = 1'
+        );
+        foreach ($this->uniqueIds($add) as $id) {
+            $addStmt->execute([$groupId, $now, $id]);
+        }
+    }
+
+    /**
+     * @param list<mixed> $ids
+     * @return list<int>
+     */
+    private function uniqueIds(array $ids): array
+    {
+        $clean = [];
+        foreach ($ids as $id) {
+            $n = (int) $id;
+            if ($n > 0) {
+                $clean[$n] = $n;
+            }
+        }
+
+        return array_values($clean);
+    }
+
     private function hasTable(): bool
     {
-        $stmt = $this->pdo->query(
-            "SELECT 1 FROM information_schema.TABLES
-             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'customer_groups' LIMIT 1"
-        );
-
-        return (bool) $stmt->fetchColumn();
+        return DbSchema::hasTable($this->pdo, 'customer_groups');
     }
 }

@@ -164,6 +164,69 @@ class PosService {
     return res['data'] as Map<String, dynamic>;
   }
 
+  Future<Map<String, dynamic>> grantCustomerLoyalty(
+    int id, {
+    required String kind,
+    required double value,
+    String? note,
+  }) async {
+    final res = await _api.post('/customers/$id/loyalty/grant', data: {
+      'kind': kind,
+      'value': value,
+      if (note != null && note.isNotEmpty) 'note': note,
+    });
+    return res['data'] as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> adjustCustomerLoyalty(
+    int id, {
+    required String kind,
+    required double delta,
+    required String note,
+  }) async {
+    final res = await _api.post('/customers/$id/loyalty/adjust', data: {
+      'kind': kind,
+      'delta': delta,
+      'note': note,
+    });
+    return res['data'] as Map<String, dynamic>;
+  }
+
+  Future<List<dynamic>> getGroupMembers(int groupId) async {
+    final res = await _api.get('/customer-groups/$groupId/members');
+    return res['data'] as List<dynamic>;
+  }
+
+  Future<List<dynamic>> changeGroupMembers(
+    int groupId, {
+    List<int> add = const [],
+    List<int> remove = const [],
+  }) async {
+    final res = await _api.post('/customer-groups/$groupId/members', data: {
+      'add': add,
+      'remove': remove,
+    });
+    final data = res['data'] as Map<String, dynamic>;
+    return data['members'] as List<dynamic>? ?? [];
+  }
+
+  Future<List<dynamic>> getSpendDiscountRules() async {
+    final res = await _api.get('/spend-discount-rules');
+    return res['data'] as List<dynamic>;
+  }
+
+  Future<void> createSpendDiscountRule(Map<String, dynamic> data) async {
+    await _api.post('/spend-discount-rules', data: data);
+  }
+
+  Future<void> updateSpendDiscountRule(int id, Map<String, dynamic> data) async {
+    await _api.put('/spend-discount-rules/$id', data: data);
+  }
+
+  Future<void> deleteSpendDiscountRule(int id) async {
+    await _api.delete('/spend-discount-rules/$id');
+  }
+
   Future<void> updateCustomer(int id, Map<String, dynamic> data) async {
     await _api.put('/customers/$id', data: data);
   }
@@ -295,11 +358,17 @@ class PosService {
     required String method,
     double cashAmount = 0,
     double cardAmount = 0,
+    double redeemBonusWallet = 0,
+    int redeemBonusMinutes = 0,
+    String? giftNote,
   }) async {
     final res = await _api.post('/sessions/$id/close', data: {
       'method': method,
       'cash_amount': cashAmount,
       'card_amount': cardAmount,
+      if (redeemBonusWallet > 0) 'redeem_bonus_wallet': redeemBonusWallet,
+      if (redeemBonusMinutes > 0) 'redeem_bonus_minutes': redeemBonusMinutes,
+      if (giftNote != null && giftNote.trim().isNotEmpty) 'gift_note': giftNote.trim(),
     });
     return res['data'] as Map<String, dynamic>;
   }

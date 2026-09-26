@@ -4,6 +4,7 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/cashier_theme.dart';
 import '../../../core/utils/json_parse.dart';
 import '../../../core/widgets/money_text.dart';
+import 'shift_activity_sheet.dart';
 
 class ShiftRailCard extends StatelessWidget {
   const ShiftRailCard({
@@ -102,6 +103,13 @@ class ShiftRailCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 6),
+            SizedBox(
+              width: double.infinity,
+              child: TextButton(
+                onPressed: () => showCashierShiftJournal(context, shift!),
+                child: const Text('Jurnal', style: TextStyle(fontSize: 12)),
+              ),
+            ),
             SizedBox(
               width: double.infinity,
               child: OutlinedButton(
