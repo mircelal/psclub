@@ -239,10 +239,8 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
     final dialogWidth = (screen.width * 0.5).clamp(420.0, 560.0);
     final dialogHeight = (screen.height * 0.85).clamp(480.0, 720.0);
 
-    final blockDismiss = widget.isCounter && total > 0;
-
     return PopScope(
-      canPop: !blockDismiss,
+      canPop: !_loading,
       child: Dialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
       child: SizedBox(
@@ -275,8 +273,10 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
                       ],
                     ),
                   ),
-                  if (!blockDismiss)
-                    IconButton(onPressed: () => Navigator.pop(context, false), icon: const Icon(Icons.close, size: 20)),
+                  IconButton(
+                    onPressed: _loading ? null : () => Navigator.pop(context, false),
+                    icon: const Icon(Icons.close, size: 20),
+                  ),
                 ],
               ),
             ),
@@ -405,23 +405,21 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
               padding: const EdgeInsets.fromLTRB(AppSpacing.xxl, AppSpacing.md, AppSpacing.xxl, AppSpacing.xl),
               child: Row(
                 children: [
-                  if (!blockDismiss) ...[
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: _loading ? null : () => Navigator.pop(context, false),
-                        child: const Text('Ləğv et'),
-                      ),
-                    ),
-                    const SizedBox(width: AppSpacing.md),
-                  ],
                   Expanded(
-                    flex: blockDismiss ? 1 : 2,
+                    child: OutlinedButton(
+                      onPressed: _loading ? null : () => Navigator.pop(context, false),
+                      child: Text(widget.isCounter ? 'Geri qayıt' : 'Ləğv et'),
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.md),
+                  Expanded(
+                    flex: 2,
                     child: FilledButton(
                       onPressed: _loading || _loadingBill || bill == null ? null : _close,
                       style: FilledButton.styleFrom(backgroundColor: AppColors.accent, foregroundColor: AppColors.bg),
                       child: _loading
                           ? const SizedBox(height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2))
-                          : Text(blockDismiss ? 'Ödənişi al və bağla' : 'Ödənişi təsdiqlə'),
+                          : Text(widget.isCounter ? 'Ödənişi al və bağla' : 'Ödənişi təsdiqlə'),
                     ),
                   ),
                 ],
