@@ -101,6 +101,9 @@ final class ReceiptService
                 $lines[] = ['type' => 'text', 'content' => '  Pul balansı: ' . number_format((float) $bill['bonus_wallet_used'], 2) . ' AZN'];
             }
         }
+        if (round((float) $bill['total_amount'], 2) <= 0 && (float) ($bill['discount'] ?? 0) > 0) {
+            $lines[] = ['type' => 'text', 'content' => 'HƏDİYYƏ — ödəniş yoxdur', 'bold' => true];
+        }
         $lines[] = ['type' => 'text', 'content' => 'ÜMUMİ: ' . number_format($bill['total_amount'], 2) . ' AZN', 'bold' => true];
         $lines[] = ['type' => 'text', 'content' => 'Ödəniş: ' . $method];
         if ($method === 'mixed') {

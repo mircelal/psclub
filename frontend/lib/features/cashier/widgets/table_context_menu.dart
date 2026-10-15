@@ -130,6 +130,7 @@ Future<void> showTableContextMenu({
   if (selected == null || !context.mounted) return;
 
   if (!await ensureOpenShiftForCashier(context, ref)) return;
+  if (!context.mounted) return;
 
   switch (selected) {
     case 'open':

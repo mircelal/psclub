@@ -14,6 +14,7 @@ class SessionCartList extends StatelessWidget {
     required this.onDecrease,
     required this.onRemove,
     this.itemDiscounts = const {},
+    this.complimentary = false,
     this.compact = false,
   });
 
@@ -24,6 +25,8 @@ class SessionCartList extends StatelessWidget {
   final void Function(Map<String, dynamic> item) onRemove;
   /// session_item id → endirim məbləği
   final Map<int, double> itemDiscounts;
+  /// Bütün səbət hədiyyədir — sətir qiyməti 0 göstərilir.
+  final bool complimentary;
   final bool compact;
 
   @override
@@ -96,8 +99,14 @@ class SessionCartList extends StatelessWidget {
                         style: TextStyle(fontWeight: FontWeight.w600, fontSize: compact ? 13 : 14, color: p.textPrimary),
                       ),
                       Text(
-                        isSetItem ? 'Paket daxilində' : '${unitPrice.toStringAsFixed(2)} ₼',
-                        style: TextStyle(fontSize: 11, color: p.textMuted),
+                        isSetItem
+                            ? 'Paket daxilində'
+                            : (complimentary ? 'Hədiyyə' : '${unitPrice.toStringAsFixed(2)} ₼'),
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: complimentary ? accent : p.textMuted,
+                          fontWeight: complimentary ? FontWeight.w700 : FontWeight.w400,
+                        ),
                       ),
                       if (lineDiscount > 0)
                         Text(
@@ -122,7 +131,7 @@ class SessionCartList extends StatelessWidget {
                 SizedBox(
                   width: compact ? 56 : 64,
                   child: Text(
-                    isSetItem ? '—' : '${lineTotal.toStringAsFixed(2)} ₼',
+                    isSetItem ? '—' : (complimentary ? '0.00 ₼' : '${lineTotal.toStringAsFixed(2)} ₼'),
                     textAlign: TextAlign.end,
                     style: TextStyle(fontWeight: FontWeight.w600, color: p.textPrimary, fontSize: compact ? 12 : 13),
                   ),

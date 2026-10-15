@@ -254,7 +254,12 @@ SessionDiscountSnapshot resolveSessionDiscount({
   final subtotal = double.parse((timeCharge + productsTotal).toStringAsFixed(2));
   final discountType = session['discount_type'] as String? ?? 'none';
   final discountValue = jsonToDouble(session['discount_value']);
-  final appliesTo = session['discount_applies_to'] as String? ?? 'time_only';
+  // Kassa satışında əl endirimi məhsula da şamil olunur. `time_only` burada
+  // vaxt haqqı 0 olduğu üçün endirimi silir və hədiyyə (100%) yenə pul istəyir.
+  var appliesTo = session['discount_applies_to'] as String? ?? 'time_only';
+  if ((session['session_type'] ?? 'table') == 'counter' && discountType != 'none') {
+    appliesTo = 'all';
+  }
 
   double discount;
   String? promotionName;

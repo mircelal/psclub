@@ -59,20 +59,25 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
   int _tick = 0;
   /// Yerli mutasiya sayğacı — köhnə poll cavabının təzə səbəti üstələməsinin qarşısını alır.
   int _mutationSeq = 0;
+  /// Ödəniş pəncərəsi açıqdır — poll paneli bağlamamalı və ya sessiyanı üstələməməlidir.
+  bool _checkoutOpen = false;
+  bool _closedHandled = false;
+  late final OpenSessionIdNotifier _openSessionNotifier;
 
   @override
   void initState() {
     super.initState();
+    _openSessionNotifier = ref.read(openSessionIdProvider.notifier);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      ref.read(openSessionIdProvider.notifier).setOpen(widget.sessionId);
+      _openSessionNotifier.setOpen(widget.sessionId);
     });
     _loadSession();
     _liveTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _tick++);
     });
     _syncTimer = Timer.periodic(const Duration(seconds: 3), (_) {
-      if (!_itemBusy && !_actionLoading) {
+      if (!_itemBusy && !_actionLoading && !_checkoutOpen) {
         _loadSession(silent: true);
       }
     });
@@ -82,7 +87,10 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
   void dispose() {
     _liveTimer?.cancel();
     _syncTimer?.cancel();
-    ref.read(openSessionIdProvider.notifier).setOpen(null);
+    // `ref` dispose-da istifadə oluna bilməz; provider-i unmount zamanı dəyişmək də olmaz.
+    final notifier = _openSessionNotifier;
+    final sessionId = widget.sessionId;
+    Future.microtask(() => notifier.clearIfOpen(sessionId));
     super.dispose();
   }
 
@@ -97,10 +105,27 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
     return discountType == 'percent' && discountValue >= 100.0;
   }
 
-  double get _counterPayableTotal {
-    final live = _liveBill();
-    return live?.totalAmount ?? _productsTotal;
+  Map<String, dynamic>? get _billPreview {
+    final raw = _session?['bill_preview'];
+    if (raw is Map<String, dynamic>) return raw;
+    if (raw is Map) return Map<String, dynamic>.from(raw);
+    return null;
   }
+
+  /// Kassa satışında tutulacaq məbləğ server `bill_preview`-dandır.
+  /// Canlı hesab `time_only` defaultu ilə məhsul qiymətini saxlayanda
+  /// hədiyyə (server cəmi 0) yenə ödəniş pəncərəsini açırdı.
+  double get _counterPayableTotal {
+    final preview = _billPreview;
+    if (_isCounter && preview != null) {
+      final gross = jsonToDouble(preview['total_amount']);
+      if (gross <= 0.009) return 0;
+      return billPayableTotal(preview);
+    }
+    return _liveBill()?.totalAmount ?? _productsTotal;
+  }
+
+  bool get _isGiftSale => _isCounter && _isGiftActive && _counterPayableTotal <= 0.009;
 
   bool get _counterNeedsPayment => _isCounter && _items.isNotEmpty && _counterPayableTotal > 0.009;
 
@@ -175,6 +200,7 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
         _session = session;
         _sessionLoading = false;
       });
+      if (session['status'] == 'closed') _handleClosedElsewhere();
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -183,6 +209,16 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
         });
       }
     }
+  }
+
+  void _handleClosedElsewhere() {
+    if (_closedHandled || _checkoutOpen || !mounted) return;
+    // Üstdə başqa dialoq açıqdırsa, onu bağlamamaq üçün növbəti poll-u gözləyirik.
+    if (ModalRoute.of(context)?.isCurrent != true) return;
+    _closedHandled = true;
+    widget.onChanged();
+    showAppSnackBar(context, 'Bu sessiya artıq bağlanıb');
+    Navigator.pop(context);
   }
 
   void _applySession(Map<String, dynamic> session) {
@@ -363,7 +399,7 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
       final rev = next[widget.sessionId];
       if (rev == null) return;
       if (prev?[widget.sessionId] == rev) return;
-      if (!_itemBusy && !_actionLoading) {
+      if (!_itemBusy && !_actionLoading && !_checkoutOpen) {
         _loadSession(silent: true);
       }
     });
@@ -463,7 +499,8 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
               _cartHeader(),
               SessionCartList(
                 items: _items,
-                productsTotal: _productsTotal,
+                productsTotal: _isGiftSale ? 0 : _productsTotal,
+                complimentary: _isGiftSale,
                 itemDiscounts: _itemDiscounts,
                 onIncrease: (i) => _changeQty(i, 1),
                 onDecrease: (i) => _changeQty(i, -1),
@@ -507,9 +544,13 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
         : (_session!['table_name'] as String? ?? 'Masa');
     final String subtitle;
     if (_isCounter) {
-      subtitle = customerName != null && customerName.isNotEmpty
-          ? '$customerName · ödənişdən sonra bağlanır'
-          : 'Tez satış · ödənişdən sonra bağlanır';
+      if (_isGiftSale) {
+        subtitle = 'Hədiyyə · ödəniş yoxdur';
+      } else if (customerName != null && customerName.isNotEmpty) {
+        subtitle = '$customerName · ödənişdən sonra bağlanır';
+      } else {
+        subtitle = 'Tez satış · ödənişdən sonra bağlanır';
+      }
     } else {
       subtitle = customerName != null && customerName.isNotEmpty
           ? '$customerName · Sessiya #${widget.sessionId}'
@@ -569,7 +610,8 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
             children: [
               SessionCartList(
                 items: _items,
-                productsTotal: _productsTotal,
+                productsTotal: _isGiftSale ? 0 : _productsTotal,
+                complimentary: _isGiftSale,
                 itemDiscounts: _itemDiscounts,
                 compact: true,
                 onIncrease: (i) => _changeQty(i, 1),
@@ -589,7 +631,7 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
       subtitle: '${_items.length} sətir',
       trailing: _items.isNotEmpty
           ? Text(
-              '${_productsTotal.toStringAsFixed(2)} ₼',
+              '${(_isGiftSale ? 0.0 : _productsTotal).toStringAsFixed(2)} ₼',
               style: TextStyle(
                 fontWeight: FontWeight.w700,
                 color: Theme.of(context).colorScheme.primary,
@@ -609,12 +651,18 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
 
     if (live == null) return const SizedBox.shrink();
 
-    final billPreview = _session!['bill_preview'] as Map<String, dynamic>?;
+    final billPreview = _billPreview;
     final loyaltyCredit = billPreview != null ? billLoyaltyCredit(billPreview) : null;
-    // Live gross may diverge from stale bill_preview — adjust loyalty against live total.
-    final displayTotal = billPreview != null
-        ? adjustTotalForLoyalty(billPreview, live.totalAmount)
-        : live.totalAmount;
+    // Kassa: server cəmi (hədiyyə 0). Masa: vaxt canlı artdığı üçün live + loyallıq.
+    final displayTotal = _isCounter
+        ? _counterPayableTotal
+        : (billPreview != null
+            ? adjustTotalForLoyalty(billPreview, live.totalAmount)
+            : live.totalAmount);
+    final previewDiscount = billPreview != null ? jsonToDouble(billPreview['discount']) : 0.0;
+    final shownDiscount = _isCounter
+        ? (previewDiscount > live.discount ? previewDiscount : live.discount)
+        : live.discount;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -622,7 +670,7 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
         BillSummaryCard(
           timeCharge: live.timeCharge,
           productsTotal: live.productsTotal,
-          discount: live.discount,
+          discount: shownDiscount,
           promotionName: live.promotionName,
           total: displayTotal,
           loyaltyCredit: loyaltyCredit,
@@ -723,6 +771,13 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
           enabled: !disabled,
           onTap: () => _toggleGift(!_isGiftActive),
         ),
+      if (_isCounter && _items.isNotEmpty)
+        _SessionQuickActionTile(
+          icon: Icons.remove_shopping_cart_outlined,
+          label: 'Ləğv et',
+          enabled: !disabled,
+          onTap: _cancelCounterSale,
+        ),
     ];
 
     if (tiles.isEmpty) return const SizedBox.shrink();
@@ -786,9 +841,54 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
             widget.sessionId,
             jsonToInt(item['id']),
           );
+      _mutationSeq++;
       if (mounted) setState(() => _session = session);
     }
     widget.onChanged();
+  }
+
+  /// Müştəri fikrini dəyişdi — səbət boşaldılır, satış ləğv olunur (stok geri qayıdır).
+  Future<void> _cancelCounterSale() async {
+    if (_itemBusy || _actionLoading) return;
+    final confirm = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Satışı ləğv et?'),
+        content: Text(
+          'Səbətdəki ${_items.length} məhsul silinəcək və satış ləğv olunacaq. '
+          'Ödəniş alınmayacaq.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Xeyr')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Theme.of(ctx).colorScheme.error),
+            child: const Text('Bəli, ləğv et'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+    setState(() => _itemBusy = true);
+    var voided = false;
+    try {
+      await _clearAllItems();
+      voided = await _voidEmptyCounterIfNeeded();
+    } catch (e) {
+      AppFeedback.error();
+      if (mounted) {
+        showAppSnackBar(context, 'Satış ləğv olunmadı: $e', isError: true);
+        widget.onChanged();
+      }
+    } finally {
+      if (mounted) setState(() => _itemBusy = false);
+    }
+    if (voided && mounted) {
+      AppFeedback.cartRemove();
+      showAppSnackBar(context, 'Satış ləğv olundu');
+      Navigator.pop(context);
+    }
   }
 
   Future<void> _closePanel() async {
@@ -807,31 +907,7 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
           await _closeSession();
           return;
         case CounterUnpaidChoice.clearCart:
-          final confirm = await showDialog<bool>(
-            context: context,
-            barrierDismissible: false,
-            builder: (ctx) => AlertDialog(
-              title: const Text('Səbəti boşalt?'),
-              content: const Text(
-                'Bütün məhsullar səbətdən silinəcək və satış ləğv olunacaq. '
-                'Bu əməliyyatı təsdiqləyin.',
-              ),
-              actions: [
-                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Xeyr')),
-                FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Bəli, boşalt')),
-              ],
-            ),
-          );
-          if (confirm != true || !mounted) return;
-          setState(() => _itemBusy = true);
-          var voided = false;
-          try {
-            await _clearAllItems();
-            voided = await _voidEmptyCounterIfNeeded();
-          } finally {
-            if (mounted) setState(() => _itemBusy = false);
-          }
-          if (voided && mounted) Navigator.pop(context);
+          await _cancelCounterSale();
           return;
         case CounterUnpaidChoice.cancel:
         case null:
@@ -969,23 +1045,34 @@ class _SessionPanelState extends ConsumerState<SessionPanel> {
       return;
     }
 
-    final closed = await showDialog<bool>(
-      context: context,
-      barrierColor: Colors.black54,
-      barrierDismissible: false,
-      builder: (_) => CloseSessionDialog(
-        sessionId: widget.sessionId,
-        tableName: _session!['table_name'] as String? ?? '',
-        isCounter: _isCounter,
-      ),
-    );
-    if (closed == true && context.mounted) {
+    _checkoutOpen = true;
+    final bool? closed;
+    try {
+      closed = await showDialog<bool>(
+        context: context,
+        barrierColor: Colors.black54,
+        barrierDismissible: false,
+        builder: (_) => CloseSessionDialog(
+          sessionId: widget.sessionId,
+          tableName: _session!['table_name'] as String? ?? '',
+          isCounter: _isCounter,
+        ),
+      );
+    } finally {
+      _checkoutOpen = false;
+    }
+    if (!mounted) return;
+    if (closed == true) {
+      _closedHandled = true;
       AppFeedback.success();
       if (_isCounter) {
         showAppSnackBar(context, 'Satış tamamlandı');
       }
       Navigator.pop(context);
       widget.onChanged();
+    } else {
+      // Ödəniş pəncərəsində endirim/bonus dəyişə bilər.
+      _loadSession(silent: true);
     }
   }
 

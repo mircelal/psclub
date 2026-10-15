@@ -1055,10 +1055,18 @@ final class SessionsController
         if ($type === 'none') {
             return $session;
         }
+        $isCounter = ($session['session_type'] ?? 'table') === 'counter';
+        $appliesTo = $session['discount_applies_to'] ?? 'time_only';
+        if ($isCounter && $appliesTo !== 'all') {
+            $appliesTo = 'all';
+            $this->pdo->prepare(
+                'UPDATE sessions SET discount_applies_to = \'all\', updated_at = NOW() WHERE id = ?'
+            )->execute([(int) $session['id']]);
+            $session['discount_applies_to'] = 'all';
+        }
         $bill = $this->calculateBill($session);
         $timeCharge = (float) $bill['time_charge'];
         $subtotal = $timeCharge + (float) $bill['products_total'];
-        $appliesTo = $session['discount_applies_to'] ?? 'time_only';
         $base = $appliesTo === 'time_only' ? $timeCharge : $subtotal;
         $value = (float) ($session['discount_value'] ?? 0);
         $amount = DiscountCalculator::amount($base, $type, $value);
@@ -1191,6 +1199,10 @@ final class SessionsController
         $subtotal = $timeCharge + $productsTotal;
         $discountType = $session['discount_type'] ?? 'none';
         $discountAppliesTo = $session['discount_applies_to'] ?? 'time_only';
+        if ($isCounter && $discountType !== 'none') {
+            $discountAppliesTo = 'all';
+            $session['discount_applies_to'] = 'all';
+        }
         $resolved = $this->promotions->resolveDiscount($session, $timeCharge, $productsTotal, 0.0, $items);
         $discount = $resolved['amount'];
         $promotion = $resolved['promotion'];

@@ -1,7 +1,7 @@
 name: psclub_pos
 description: PS Club POS - PlayStation klubu kassir və admin
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.0.2+3
 
 environment:
   sdk: ^3.11.5

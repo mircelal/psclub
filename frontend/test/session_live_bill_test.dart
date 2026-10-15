@@ -356,4 +356,79 @@ void main() {
 
     expect(bill.discount, 3.0);
   });
+
+  test('counter gift 100% zeroes the product total', () {
+    final session = {
+      'session_type': 'counter',
+      'status': 'active',
+      'opened_at': DateTime.now().toUtc().toIso8601String(),
+      'discount_type': 'percent',
+      'discount_value': '100.00',
+      'discount_applies_to': 'all',
+      'pauses': <dynamic>[],
+      'items': [
+        {'id': '4', 'quantity': '1', 'unit_price': '3.50', 'is_set_item': 0},
+      ],
+    };
+
+    final bill = computeSessionLiveBill(
+      session,
+      billingMode: 'per_minute',
+      timeBillingEnabled: true,
+    );
+
+    expect(bill.productsTotal, 3.5);
+    expect(bill.discount, 3.5);
+    expect(bill.totalAmount, 0);
+  });
+
+  test('counter gift zeroes products even when scope is time_only', () {
+    final session = {
+      'session_type': 'counter',
+      'status': 'active',
+      'opened_at': DateTime.now().toUtc().toIso8601String(),
+      'discount_type': 'percent',
+      'discount_value': 100,
+      'discount_applies_to': 'time_only',
+      'pauses': <dynamic>[],
+      'items': [
+        {'quantity': 2, 'unit_price': 3.5, 'is_set_item': false},
+      ],
+    };
+
+    final bill = computeSessionLiveBill(
+      session,
+      billingMode: 'per_minute',
+      timeBillingEnabled: true,
+    );
+
+    expect(bill.discount, 7);
+    expect(bill.totalAmount, 0);
+  });
+
+  test('table 100% time_only discount does not zero products', () {
+    final session = {
+      'session_type': 'table',
+      'status': 'active',
+      'opened_at': DateTime.now().toUtc().toIso8601String(),
+      'set_price_snapshot': 10.0,
+      'discount_type': 'percent',
+      'discount_value': 100,
+      'discount_applies_to': 'time_only',
+      'pauses': <dynamic>[],
+      'items': [
+        {'quantity': 1, 'unit_price': 4.0, 'is_set_item': false},
+      ],
+    };
+
+    final bill = computeSessionLiveBill(
+      session,
+      billingMode: 'per_minute',
+      timeBillingEnabled: true,
+    );
+
+    expect(bill.productsTotal, 4);
+    expect(bill.discount, 10);
+    expect(bill.totalAmount, 4);
+  });
 }

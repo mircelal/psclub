@@ -23,7 +23,7 @@ Future<CounterUnpaidChoice?> showCounterUnpaidDialog(
         children: [
           Text(
             'Səbətdə $itemCount məhsul var (${total.toStringAsFixed(2)} ₼). '
-            'Satışı açıq saxlamaq olmaz — ödəniş alın və ya səbəti tam boşaldın.',
+            'Satışı açıq saxlamaq olmaz — ödəniş alın və ya müştəri imtina edibsə satışı ləğv edin.',
             style: Theme.of(ctx).textTheme.bodyMedium,
           ),
           const SizedBox(height: AppSpacing.md),
@@ -44,7 +44,7 @@ Future<CounterUnpaidChoice?> showCounterUnpaidDialog(
         ),
         TextButton(
           onPressed: () => Navigator.pop(ctx, CounterUnpaidChoice.clearCart),
-          child: const Text('Səbəti boşalt'),
+          child: const Text('Satışı ləğv et'),
         ),
         FilledButton.icon(
           onPressed: () => Navigator.pop(ctx, CounterUnpaidChoice.pay),

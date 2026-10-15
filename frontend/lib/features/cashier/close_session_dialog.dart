@@ -272,7 +272,12 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
     final config = ref.watch(businessConfigProvider).valueOrNull ?? BusinessConfig.fallback;
 
     if (_receipt != null) {
-      return Dialog(
+      return PopScope(
+        canPop: false,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) Navigator.pop(context, true);
+        },
+        child: Dialog(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 400),
           child: Padding(
@@ -312,6 +317,7 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
             ),
           ),
         ),
+        ),
       );
     }
 
@@ -322,10 +328,16 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
     final dialogWidth = (screen.width * 0.5).clamp(420.0, 560.0);
     final dialogHeight = (screen.height * 0.85).clamp(480.0, 720.0);
 
-    final blockDismiss = widget.isCounter && total > 0;
+    final cancelLabel = widget.isCounter ? 'Səbətə qayıt' : 'Ləğv et';
+    final freeOfCharge = total <= 0.009;
+    final confirmLabel = freeOfCharge
+        ? ((bill?.discount ?? 0) > 0.009
+            ? 'Hədiyyəni tamamla'
+            : (widget.isCounter ? 'Satışı tamamla' : 'Hesabı bağla'))
+        : (widget.isCounter ? 'Ödənişi al və bağla' : 'Ödənişi təsdiqlə');
 
     return PopScope(
-      canPop: !blockDismiss,
+      canPop: !_loading,
       child: Dialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
       child: SizedBox(
@@ -358,8 +370,11 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
                       ],
                     ),
                   ),
-                  if (!blockDismiss)
-                    IconButton(onPressed: () => Navigator.pop(context, false), icon: const Icon(Icons.close, size: 20)),
+                  IconButton(
+                    onPressed: _loading ? null : () => Navigator.pop(context, false),
+                    tooltip: cancelLabel,
+                    icon: const Icon(Icons.close, size: 20),
+                  ),
                 ],
               ),
             ),
@@ -440,12 +455,16 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
                             ),
                             child: Column(
                               children: [
-                                Text('Ödəniləcək məbləğ', style: Theme.of(context).textTheme.bodyMedium),
+                                Text(
+                                  freeOfCharge ? 'Ödəniş yoxdur' : 'Ödəniləcək məbləğ',
+                                  style: Theme.of(context).textTheme.bodyMedium,
+                                ),
                                 const SizedBox(height: AppSpacing.sm),
                                 Center(child: MoneyText(amount: total, size: MoneySize.hero, color: AppColors.accent)),
                               ],
                             ),
                           ),
+                          if (!freeOfCharge) ...[
                           const SizedBox(height: AppSpacing.xl),
                           Text('Ödəniş üsulu', style: Theme.of(context).textTheme.titleMedium),
                           const SizedBox(height: AppSpacing.md),
@@ -512,6 +531,7 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
                                   )
                                 : const SizedBox.shrink(),
                           ),
+                          ],
                         ],
                       ),
                     ),
@@ -521,23 +541,22 @@ class _CloseSessionDialogState extends ConsumerState<CloseSessionDialog> {
               padding: const EdgeInsets.fromLTRB(AppSpacing.xxl, AppSpacing.md, AppSpacing.xxl, AppSpacing.xl),
               child: Row(
                 children: [
-                  if (!blockDismiss) ...[
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: _loading ? null : () => Navigator.pop(context, false),
-                        child: const Text('Ləğv et'),
-                      ),
-                    ),
-                    const SizedBox(width: AppSpacing.md),
-                  ],
                   Expanded(
-                    flex: blockDismiss ? 1 : 2,
+                    child: OutlinedButton.icon(
+                      onPressed: _loading ? null : () => Navigator.pop(context, false),
+                      icon: Icon(widget.isCounter ? Icons.arrow_back : Icons.close, size: 18),
+                      label: Text(cancelLabel),
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.md),
+                  Expanded(
+                    flex: 2,
                     child: FilledButton(
                       onPressed: _loading || _loadingBill || bill == null ? null : _close,
                       style: FilledButton.styleFrom(backgroundColor: AppColors.accent, foregroundColor: AppColors.bg),
                       child: _loading
                           ? const SizedBox(height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2))
-                          : Text(blockDismiss ? 'Ödənişi al və bağla' : 'Ödənişi təsdiqlə'),
+                          : Text(confirmLabel),
                     ),
                   ),
                 ],

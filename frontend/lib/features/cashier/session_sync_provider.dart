@@ -6,6 +6,10 @@ class OpenSessionIdNotifier extends Notifier<int?> {
   int? build() => null;
 
   void setOpen(int? sessionId) => state = sessionId;
+
+  void clearIfOpen(int sessionId) {
+    if (state == sessionId) state = null;
+  }
 }
 
 final openSessionIdProvider = NotifierProvider<OpenSessionIdNotifier, int?>(OpenSessionIdNotifier.new);

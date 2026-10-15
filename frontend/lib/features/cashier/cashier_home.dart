@@ -82,6 +82,7 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
 
   Future<void> _openTable(Map<String, dynamic> table) async {
     if (!await ensureOpenShiftForCashier(context, ref)) return;
+    if (!mounted) return;
     final result = await showOpenTableDialog(context, table);
     if (result == null || !result.confirmed) return;
 
@@ -127,6 +128,7 @@ class _CashierHomeState extends ConsumerState<CashierHome> {
 
   Future<void> _startCounterSale() async {
     if (!await ensureOpenShiftForCashier(context, ref)) return;
+    if (!mounted) return;
     final result = await showOpenCounterSaleDialog(context);
     if (result == null || !result.confirmed) return;
 
